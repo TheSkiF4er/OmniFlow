@@ -107,7 +107,7 @@ git push origin feature/my-new-feature
 
 ## Reporting Issues
 
-* Use the [GitHub Issues](https://github.com/YOUR_NAME/omniflow/issues) tracker
+* Use the [GitHub Issues](https://github.com/TheSkiF4er/omniflow/issues) tracker
 * Provide clear steps to reproduce bugs
 * Include logs or screenshots when possible
 
