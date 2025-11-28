@@ -1,1 +1,85 @@
+version: "3.9"
 
+services:
+  # =========================
+  # Core engine
+  # =========================
+  core:
+    build:
+      context: .
+      dockerfile: Dockerfile.core
+    container_name: omniflow-core
+    ports:
+      - "8080:8080"  # REST/gRPC API
+    environment:
+      OMNIFLOW_ENV: production
+      DB_HOST: db
+      DB_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./core/logs:/app/logs
+
+  # =========================
+  # UI (React + TypeScript)
+  # =========================
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    container_name: omniflow-ui
+    ports:
+      - "3000:3000"
+    depends_on:
+      - core
+
+  # =========================
+  # PostgreSQL Database
+  # =========================
+  db:
+    image: postgres:16-alpine
+    container_name: omniflow-db
+    environment:
+      POSTGRES_USER: omniflow
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: omniflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  # =========================
+  # Redis (for queues and events)
+  # =========================
+  redis:
+    image: redis:8-alpine
+    container_name: omniflow-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # =========================
+  # Optional: Flower / monitoring for Celery (if using Python plugins)
+  # =========================
+  flower:
+    image: mher/flower:1.0.0
+    container_name: omniflow-flower
+    environment:
+      - FLOWER_PORT=5555
+      - CELERY_BROKER=redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+
+# =========================
+# Volumes
+# =========================
+volumes:
+  db_data:
+  redis_data:
+  
