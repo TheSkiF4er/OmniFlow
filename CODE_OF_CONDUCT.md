@@ -36,7 +36,7 @@ Project maintainers are responsible for clarifying the standards of acceptable b
 
 If you are subject to or witness unacceptable behavior, please report it by contacting the project team at:
 
-**Email:** [contact@omniflow.io](mailto:contact@omniflow.io)
+**Email:** [community@cajeer.com](mailto:community@cajeer.com)
 
 All reports will be reviewed and investigated promptly and fairly.
 
