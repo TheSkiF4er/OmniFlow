@@ -1,1 +1,51 @@
+# Example workflow for OmniFlow — demonstration purposes
+workflow:
+  id: example_workflow_01
+  name: "Example Workflow"
+  description: "A simple workflow demonstrating task sequence and decision logic"
 
+  start_node: start
+  nodes:
+    - id: start
+      type: start
+      name: "Start Node"
+      plugin: js_print_hello
+      next:
+        - task1
+
+    - id: task1
+      type: task
+      name: "Task Node 1 - Data Processing"
+      plugin: python_double_number
+      next:
+        - decision1
+
+    - id: decision1
+      type: decision
+      name: "Decision Node"
+      condition: "event.result > 10"
+      next:
+        true:
+          - task2
+        false:
+          - task3
+
+    - id: task2
+      type: task
+      name: "Task Node 2 - Send Success Notification"
+      plugin: telegram_notify
+      next:
+        - end
+
+    - id: task3
+      type: task
+      name: "Task Node 3 - Send Failure Notification"
+      plugin: discord_notify
+      next:
+        - end
+
+    - id: end
+      type: end
+      name: "End Node"
+      plugin: js_print_done
+      
