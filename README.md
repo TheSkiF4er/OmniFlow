@@ -11,10 +11,10 @@
   <img src="https://img.shields.io/badge/maintained-yes-brightgreen.svg" alt="maintained" />
   
   <!-- REPOSITORY STATS -->
-  <img src="https://img.shields.io/github/stars/YOUR_NAME/omniflow?style=social" alt="stars" />
-  <img src="https://img.shields.io/github/forks/YOUR_NAME/omniflow?style=social" alt="forks" />
-  <img src="https://img.shields.io/github/commit-activity/m/YOUR_NAME/omniflow" alt="commits" />
-  <img src="https://img.shields.io/github/last-commit/YOUR_NAME/omniflow" alt="last commit" />
+  <img src="https://img.shields.io/github/stars/TheSkiF4er/omniflow?style=social" alt="stars" />
+  <img src="https://img.shields.io/github/forks/TheSkiF4er/omniflow?style=social" alt="forks" />
+  <img src="https://img.shields.io/github/commit-activity/m/TheSkiF4er/omniflow" alt="commits" />
+  <img src="https://img.shields.io/github/last-commit/TheSkiF4er/omniflow" alt="last commit" />
 
   <!-- QUALITY & SECURITY -->
   <img src="https://img.shields.io/badge/build-passing-brightgreen.svg" alt="build" />
@@ -31,7 +31,7 @@
 
   <!-- COMMUNITY -->
   <img src="https://img.shields.io/badge/PRs-welcome-purple.svg" alt="prs" />
-  <a href="https://discord.gg/YOUR_INVITE">
+  <a href="https://discord.gg/QmJ2NDkzYv">
     <img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2.svg" alt="discord" />
   </a>
 
@@ -106,6 +106,7 @@ Official connectors included:
 
 ## 📁 Repository Structure
 
+```
 omniflow/
 ├─ core/ # Workflow engine (Go / C# / Java implementation)
 ├─ ui/ # Web application (React + TypeScript)
@@ -125,6 +126,7 @@ omniflow/
 ├─ docker-compose.yml # Full-stack development environment
 ├─ LICENSE # Apache License 2.0
 └─ README.md # You are here
+```
 
 ---
 
