@@ -1,20 +1,23 @@
 # OmniFlow — API Reference
 
-### Table of Contents
-1. Authentication
-2. Workflows
-3. Plugins
-4. Connectors
-5. Real-time Events (WebSocket)
+## Table of Contents
+
+1. [Authentication](#authentication)
+2. [Workflows](#workflows)
+3. [Plugins](#plugins)
+4. [Connectors](#connectors)
+5. [Real-time Events (WebSocket)](#real-time-events-websocket)
 
 ---
 
 ## Authentication
 
 ### POST /api/login
+
 Authenticate a user and obtain a JWT token.
 
 **Request:**
+
 ```json
 POST /api/login
 Content-Type: application/json
@@ -26,18 +29,19 @@ Content-Type: application/json
 ```
 
 **Response:**
+
 ```json
 {
     "token": "eyJhbGciOiJIUzI1NiIsInR..."
 }
 ```
 
----
-
 ### POST /api/logout
+
 Invalidate the current token.
 
 **Response:**
+
 ```json
 {
     "message": "Logged out successfully"
@@ -49,9 +53,11 @@ Invalidate the current token.
 ## Workflows
 
 ### GET /api/workflows
+
 Retrieve a list of all workflows.
 
 **Response:**
+
 ```json
 [
     {
@@ -64,9 +70,11 @@ Retrieve a list of all workflows.
 ```
 
 ### POST /api/workflows
+
 Create a new workflow.
 
 **Request:**
+
 ```json
 {
     "name": "New Workflow",
@@ -76,6 +84,7 @@ Create a new workflow.
 ```
 
 **Response:**
+
 ```json
 {
     "id": "wf_456",
@@ -85,6 +94,7 @@ Create a new workflow.
 ```
 
 ### GET /api/workflows/{id}
+
 Retrieve a single workflow by ID.
 
 ---
@@ -92,12 +102,15 @@ Retrieve a single workflow by ID.
 ## Plugins
 
 ### GET /api/plugins
+
 List all installed plugins.
 
 ### POST /api/plugins/{plugin_id}/execute
+
 Execute a plugin with input data.
 
 **Request:**
+
 ```json
 {
     "input": { "value": 42 }
@@ -105,6 +118,7 @@ Execute a plugin with input data.
 ```
 
 **Response:**
+
 ```json
 {
     "output": { "result": 84 }
@@ -116,9 +130,11 @@ Execute a plugin with input data.
 ## Connectors
 
 ### POST /api/connectors/{connector_name}/trigger
+
 Trigger a connector event.
 
 **Request:**
+
 ```json
 {
     "event": "message",
@@ -127,6 +143,7 @@ Trigger a connector event.
 ```
 
 **Response:**
+
 ```json
 {
     "status": "ok"
@@ -141,11 +158,13 @@ OmniFlow supports WebSocket connections for real-time workflow updates.
 
 * **Endpoint:** `ws://localhost:8080/ws`
 * **Events:**
+
   * `workflow_update`
   * `plugin_output`
   * `connector_event`
 
 **Example:**
+
 ```json
 {
     "event": "workflow_update",
@@ -166,7 +185,7 @@ OmniFlow supports WebSocket connections for real-time workflow updates.
 | 404  | Not Found             |
 | 500  | Internal Server Error |
 
---- 
+---
 
 ## Notes
 
