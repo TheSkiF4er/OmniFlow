@@ -1,1 +1,45 @@
+# =========================
+# Build stage
+# =========================
+FROM golang:1.21-alpine AS builder
 
+# Install git and ca-certificates for Go modules
+RUN apk add --no-cache git ca-certificates
+
+# Set working directory
+WORKDIR /app
+
+# Copy Go module files
+COPY core/go.mod core/go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy the rest of the source code
+COPY core/ .
+
+# Build the Go binary
+RUN go build -o omniflow-core ./engine.go ./scheduler.go ./workflow.go
+
+# =========================
+# Run stage
+# =========================
+FROM alpine:3.18
+
+# Install ca-certificates for HTTPS requests
+RUN apk add --no-cache ca-certificates tzdata
+
+# Set working directory
+WORKDIR /app
+
+# Copy the built binary from builder
+COPY --from=builder /app/omniflow-core .
+
+# Expose ports if needed (e.g., REST API, gRPC)
+EXPOSE 8080
+
+# Set environment variables
+ENV OMNIFLOW_ENV=production
+
+# Run the binary
+CMD ["./omniflow-core"]
