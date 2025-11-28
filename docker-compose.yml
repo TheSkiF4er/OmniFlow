@@ -1,1 +1,69 @@
+version: "3.9"
 
+services:
+  omniflow:
+    container_name: omniflow
+    image: omniflow/engine:latest
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8080:8080"
+    environment:
+      # --- OmniFlow Core Configuration ---
+      OMNIFLOW_ENV: production
+      OMNIFLOW_LOG_LEVEL: info
+
+      # --- Database ---
+      DATABASE_DRIVER: postgres
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: omniflow
+      DATABASE_USER: omniflow
+      DATABASE_PASSWORD: omniflow_password
+
+      # --- Redis ---
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+
+      # --- Security ---
+      JWT_SECRET: "CHANGE_ME_very_secret_key"
+
+    volumes:
+      - omniflow_data:/var/lib/omniflow
+
+  postgres:
+    container_name: omniflow_postgres
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: omniflow
+      POSTGRES_USER: omniflow
+      POSTGRES_PASSWORD: omniflow_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    container_name: omniflow_redis
+    image: redis:7
+    restart: unless-stopped
+    command: ["redis-server", "--save", "20", "1", "--loglevel", "warning"]
+    volumes:
+      - redis_data:/data
+
+  adminer:
+    container_name: omniflow_adminer
+    image: adminer:latest
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    ports:
+      - "9090:8080"
+
+volumes:
+  omniflow_data:
+  postgres_data:
+  redis_data:
+  
