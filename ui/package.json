@@ -1,1 +1,41 @@
-
+{
+  "name": "omniflow-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OmniFlow - Web UI for Universal Automation & Workflow Engine",
+  "author": "OmniFlow Contributors",
+  "license": "Apache-2.0",
+  "scripts": {
+    "start": "webpack serve --config webpack.dev.js --open",
+    "build": "webpack --config webpack.prod.js",
+    "lint": "eslint 'src/**/*.{ts,tsx,js,jsx}'",
+    "format": "prettier --write 'src/**/*.{ts,tsx,js,jsx,css,scss,md}'"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.14.1",
+    "axios": "^1.5.0",
+    "redux": "^4.2.1",
+    "react-redux": "^8.2.0",
+    "redux-thunk": "^2.4.3",
+    "antd": "^5.11.0",
+    "classnames": "^2.3.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.12",
+    "@types/react-dom": "^18.2.5",
+    "@typescript-eslint/eslint-plugin": "^6.7.0",
+    "@typescript-eslint/parser": "^6.7.0",
+    "eslint": "^8.46.0",
+    "prettier": "^3.9.0",
+    "typescript": "^5.3.2",
+    "webpack": "^5.88.2",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^4.15.1",
+    "ts-loader": "^9.4.5",
+    "css-loader": "^6.8.1",
+    "style-loader": "^3.3.3",
+    "html-webpack-plugin": "^5.5.3"
+  }
+}
