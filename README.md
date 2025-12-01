@@ -6,7 +6,6 @@
 
   <!-- PROJECT STATUS -->
   <img src="https://img.shields.io/badge/version-1.0.0-blue.svg" alt="version" />
-  <img src="https://img.shields.io/badge/status-active-success.svg" alt="status" />
   <img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license" />
   <img src="https://img.shields.io/badge/maintained-yes-brightgreen.svg" alt="maintained" />
   
