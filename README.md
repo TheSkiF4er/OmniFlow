@@ -25,7 +25,7 @@
   <img src="https://img.shields.io/badge/languages-multi--language-orange.svg" alt="languages" />
   <img src="https://img.shields.io/badge/API-REST%20%2B%20WS%20%2B%20gRPC-yellow.svg" alt="api" />
   <img src="https://img.shields.io/badge/UI-React%20%2B%20TS-61dafb.svg" alt="ui" />
-  <img src="https://img.shields.io/badge/core-Go%20%7C%20C%23%20%7C-blue.svg" alt="core languages" />
+  <img src="https://img.shields.io/badge/core-Go-blue.svg" alt="core languages" />
 
   <!-- COMMUNITY -->
   <img src="https://img.shields.io/badge/PRs-welcome-purple.svg" alt="prs" />
