@@ -44,13 +44,11 @@ plugins/cpp/
 ├── Dockerfile                # Multi-stage builder → minimal runtime
 ├── README.md                 # (this file)
 ├── sample_plugin.cpp         # main plugin source (example name)
-├── include/                  # public headers (if any)
 ├── third_party/
 │   └── nlohmann/json.hpp     # minimal vendored JSON (or upstream)
 ├── tests/
 │   ├── unit/                 # GoogleTest unit tests (C++)
 │   └── integration/          # integration scripts (bash)
-└── LICENSE
 ```
 
 > Adjust filenames to match your codebase — the Makefile and Dockerfile try to detect common locations.
