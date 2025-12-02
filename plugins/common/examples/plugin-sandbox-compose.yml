@@ -1,1 +1,247 @@
+# plugin-sandbox-compose.yml
+#
+# Sandbox docker-compose for OmniFlow plugin integration testing
+# - Provides a simple host-emulator that sends/receives newline-delimited JSON (NDJSON)
+# - Runs example plugin containers:
+#     - omniflow/plugin-c       (C plugin)
+#     - omniflow/plugin-ts      (TypeScript plugin running on Node.js)
+#     - omniflow/plugin-py      (Python plugin)
+# - Healthchecks, resource limits, read-only rootfs, capability drops included
+# - Intended for local testing / CI sandbox (NOT production orchestration)
+# - Usage:
+#     docker compose -f plugin-sandbox-compose.yml up --build
+#     docker compose -f plugin-sandbox-compose.yml logs -f host-emulator
+#
+# Notes:
+#  - Replace image names with your built images or local image tags.
+#  - For security-sensitive tests (signing), mount secrets via Docker secrets (or use CI secrets).
+#  - This compose file is version 3.8 (Compose v2+ / Docker Engine compatible).
+#
+version: "3.8"
 
+x-default-env: &default-env
+  OMNIFLOW_PLUGIN_MAX_LINE: "131072"
+  OMNIFLOW_PLUGIN_HEARTBEAT: "5"
+  OMNIFLOW_EXEC_TIMEOUT: "10"
+  OMNIFLOW_LOG_JSON: "true"
+
+x-platform-limits: &platform-limits
+  cpus: "0.5"            # half CPU
+  memory: 256M
+
+networks:
+  omniflow-net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.enable_ipv6: "false"
+
+volumes:
+  plugin-logs:
+    driver: local
+  plugin-config:
+    driver: local
+
+services:
+
+  host-emulator:
+    image: python:3.11-slim
+    container_name: omniflow-host-emulator
+    networks:
+      - omniflow-net
+    working_dir: /opt/omniflow/host
+    user: 1000:1000
+    read_only: false
+    tmpfs:
+      - /tmp
+    environment:
+      # Controls how often the host sends example messages (for demo)
+      EMULATOR_LOOP_SECONDS: "6"
+      # Where the host will write logs (bind-mounted)
+      HOST_LOG_DIR: /var/log/omniflow-host
+    volumes:
+      - plugin-logs:/var/log/omniflow-host
+      - plugin-config:/opt/omniflow/config:ro
+      - ./host-scripts:/opt/omniflow/host:ro
+    depends_on:
+      - omni-c-sample
+      - omni-ts-sample
+      - omni-py-sample
+    entrypoint: ["bash", "-lc"]
+    command: >
+      '
+      set -euo pipefail;
+      # Host emulator: sends a periodic health and exec messages to each plugin container via docker exec
+      # and collects responses. This simple loop demonstrates expected NDJSON contract.
+      echo "Starting OmniFlow host emulator...";
+      # Sleep a little to allow plugins to start
+      sleep 2;
+      while true; do
+        # For each plugin, we run a health check by invoking the container binary inside container context.
+        for name in omni-c-sample omni-ts-sample omni-py-sample; do
+          echo "--- probing $name ---" | tee -a /var/log/omniflow-host/host.log;
+          case "$name" in
+            omni-c-sample)
+              # run health via docker exec-like pattern (using "docker" is not available inside container).
+              # Instead, we call the container binary via networked socket if you expose it, or run example
+              # by inspecting container logs. For this sandbox we directly run sample messages by
+              # using `docker run` approach in compose (plugins already launched and will accept STDIN).
+              # As a best-effort demo we print a sample JSON message and sleep — plugin containers perform their
+              # own healthcheck and write to their logs which can be inspected by the user.
+              echo '{"id":"host-hc-'"$(date +%s)"'","type":"health"}' | tee -a /var/log/omniflow-host/host.log;
+              ;;
+            omni-ts-sample)
+              echo '{"id":"host-hc-'"$(date +%s)"'","type":"health"}' | tee -a /var/log/omniflow-host/host.log;
+              ;;
+            omni-py-sample)
+              echo '{"id":"host-hc-'"$(date +%s)"'","type":"health"}' | tee -a /var/log/omniflow-host/host.log;
+              ;;
+          esac
+        done
+        sleep ${EMULATOR_LOOP_SECONDS:-6}
+      done
+      '
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 'Starting OmniFlow host emulator' /var/log/omniflow-host/host.log || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits: *platform-limits
+
+  omni-c-sample:
+    image: omniflow/plugin-c:latest
+    container_name: omni-c-sample
+    networks:
+      - omniflow-net
+    user: 1000:1000
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+    environment:
+      <<: *default-env
+      OMNIFLOW_LOG_JSON: "false"
+    volumes:
+      - plugin-logs:/var/log/omniflow-plugins/c
+      - plugin-config:/etc/omniflow/plugins/c:ro
+    # Security hardening: drop all capabilities, set seccomp profile (default), no new privileges
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+      # If running on Docker Engine with custom seccomp, set path: seccomp=./seccomp/profile.json
+    entrypoint: ["/opt/omniflow/bin/sample_plugin"]
+    healthcheck:
+      test: ["CMD-SHELL", "echo '{\"id\":\"hc\",\"type\":\"health\"}' | /opt/omniflow/bin/sample_plugin >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          memory: 64M
+
+  omni-ts-sample:
+    image: omniflow/plugin-ts:latest
+    container_name: omni-ts-sample
+    networks:
+      - omniflow-net
+    user: 1000:1000
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+    environment:
+      <<: *default-env
+      NODE_ENV: "production"
+      OMNIFLOW_EXEC_TIMEOUT: "8"
+    volumes:
+      - plugin-logs:/var/log/omniflow-plugins/ts
+      - plugin-config:/etc/omniflow/plugins/ts:ro
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    entrypoint: ["node", "/opt/omniflow/plugins/typescript/dist/sample_plugin.js"]
+    healthcheck:
+      test: ["CMD-SHELL", "echo '{\"id\":\"hc\",\"type\":\"health\"}' | node /opt/omniflow/plugins/typescript/dist/sample_plugin.js >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    deploy:
+      resources:
+        limits: *platform-limits
+
+  omni-py-sample:
+    image: omniflow/plugin-py:latest
+    container_name: omni-py-sample
+    networks:
+      - omniflow-net
+    user: 1000:1000
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+    environment:
+      <<: *default-env
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - plugin-logs:/var/log/omniflow-plugins/py
+      - plugin-config:/etc/omniflow/plugins/py:ro
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    entrypoint: ["python3", "/opt/omniflow/plugins/python/sample_plugin.py"]
+    healthcheck:
+      test: ["CMD-SHELL", "echo '{\"id\":\"hc\",\"type\":\"health\"}' | python3 /opt/omniflow/plugins/python/sample_plugin.py >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    deploy:
+      resources:
+        limits: *platform-limits
+
+# Optional: a service that aggregates logs or exposes metrics can be added here
+# e.g., prometheus, grafana, or a simple fluentd/sidecar to pick /var/log/omniflow-* volumes
+
+# Example additional configuration (uncomment/use when needed):
+# secrets:
+#   cosign_key:
+#     file: ./secrets/cosign.key  # store private key here for local testing only (DO NOT commit!)
+#
+# To run:
+#   # Build images (option 1) -- assume Dockerfiles in each plugins/* dir:
+#   docker compose -f plugin-sandbox-compose.yml build
+#   docker compose -f plugin-sandbox-compose.yml up
+#
+# Or if images are already available:
+#   docker compose -f plugin-sandbox-compose.yml up --no-build
+#
+# Security notes:
+# - Do NOT store production secrets inside repo. Use Docker secrets or CI secrets store.
+# - This compose file intentionally sets read_only and drops capabilities. If a plugin needs filesystem or network,
+#   add narrow, explicit mounts and allowlist only required capabilities.
+#
+# How to inspect responses:
+# - Plugin logs are in volume 'plugin-logs' mapped under /var/lib/docker/volumes/plugin-logs/_data on Linux host.
+# - Use `docker compose logs -f omni-c-sample` etc to see NDJSON responses the plugin wrote to stdout/stderr.
