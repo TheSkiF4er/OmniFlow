@@ -1,1 +1,224 @@
-
+{
+  "schema_version": "1.0.0",
+  "example_name": "OmniFlow Plugin Integration Example",
+  "description": "Reference integration JSON showing how to register and run OmniFlow plugins (multi-language). This file demonstrates recommended fields: plugin identity, runtime invocation, environment, healthchecks, timeouts, resource limits, security constraints and example messages the host might send. Use this as a template when wiring plugins into OmniFlow.",
+  "generated_at": "2025-12-02T00:00:00Z",
+  "maintainer": {
+    "name": "TheSkiF4er / OmniFlow",
+    "contact": "maintainers@omniflow.example",
+    "license": "Apache-2.0"
+  },
+  "global_defaults": {
+    "max_message_bytes": 131072,
+    "exec_timeout_seconds": 10,
+    "heartbeat_seconds": 5,
+    "log_json": false,
+    "plugin_workdir": "/opt/omniflow/plugins",
+    "restart_policy": "on-failure",
+    "max_restarts": 5
+  },
+  "plugins": [
+    {
+      "id": "omni-c-sample",
+      "display_name": "C Sample Plugin",
+      "description": "Reference C plugin implementing health/exec/shutdown over newline-delimited JSON.",
+      "path": "plugins/c/sample_plugin",
+      "run": {
+        "type": "executable",
+        "command": "/opt/omniflow/plugins/c/sample_plugin",
+        "args": [],
+        "user": "nobody",
+        "workdir": "/opt/omniflow/plugins/c",
+        "shell": false
+      },
+      "runtime": {
+        "containerized": true,
+        "docker_image": "omniflow/plugin-c:v1.0.0",
+        "healthcheck_cmd": "echo '{\"id\":\"hc\",\"type\":\"health\"}' | /opt/omniflow/plugins/c/sample_plugin",
+        "healthcheck_interval_seconds": 30
+      },
+      "environment": {
+        "OMNIFLOW_PLUGIN_MAX_LINE": 131072,
+        "OMNIFLOW_PLUGIN_HEARTBEAT": 5,
+        "OMNIFLOW_EXEC_TIMEOUT": 10,
+        "OMNIFLOW_LOG_JSON": "false"
+      },
+      "resources": {
+        "cpu_shares": 512,
+        "memory_limit_bytes": 536870912,
+        "readonly_rootfs": true
+      },
+      "security": {
+        "capabilities_drop": ["ALL"],
+        "seccomp_profile": "default",
+        "apparmor_profile": "runtime/omniflow.plugin",
+        "allow_network": false,
+        "filesystem_access": [
+          {
+            "path": "/opt/omniflow/plugins/c/config",
+            "mode": "ro"
+          }
+        ]
+      },
+      "timeouts": {
+        "start_timeout_seconds": 10,
+        "stop_timeout_seconds": 5,
+        "exec_timeout_seconds": 10
+      },
+      "examples": {
+        "startup": [
+          {
+            "note": "Host starts plugin process and checks health.",
+            "host_command": "systemd/docker-run or OmniFlow supervisor",
+            "expected_health_response": {
+              "id": "hc-1",
+              "status": "ok",
+              "body": { "status": "healthy", "version": "1.0.0" }
+            }
+          }
+        ],
+        "messages": [
+          {
+            "id": "msg-1",
+            "type": "health",
+            "payload": null,
+            "description": "Health probe from host"
+          },
+          {
+            "id": "msg-2",
+            "type": "exec",
+            "payload": { "action": "echo", "message": "hello" },
+            "description": "Echo action"
+          },
+          {
+            "id": "msg-3",
+            "type": "exec",
+            "payload": { "action": "reverse", "message": "Привет" },
+            "description": "Unicode-safe reverse"
+          },
+          {
+            "id": "msg-4",
+            "type": "exec",
+            "payload": { "action": "compute", "numbers": [1, 2, 3.5] },
+            "description": "Compute sum"
+          },
+          {
+            "id": "msg-5",
+            "type": "shutdown",
+            "payload": null,
+            "description": "Ask plugin to gracefully shutdown"
+          }
+        ]
+      }
+    },
+    {
+      "id": "omni-ts-sample",
+      "display_name": "TypeScript Sample Plugin",
+      "description": "Reference TypeScript plugin compiled to Node.js, demonstrates async exec handling and AbortController timeouts.",
+      "path": "plugins/typescript/sample_plugin.js",
+      "run": {
+        "type": "node",
+        "command": "node",
+        "args": ["/opt/omniflow/plugins/typescript/dist/sample_plugin.js"],
+        "user": "node",
+        "workdir": "/opt/omniflow/plugins/typescript",
+        "shell": false
+      },
+      "runtime": {
+        "containerized": false,
+        "node_version": "20.x",
+        "healthcheck_cmd": "echo '{\"id\":\"hc\",\"type\":\"health\"}' | node /opt/omniflow/plugins/typescript/dist/sample_plugin.js",
+        "healthcheck_interval_seconds": 30
+      },
+      "environment": {
+        "OMNIFLOW_PLUGIN_MAX_LINE": 131072,
+        "OMNIFLOW_PLUGIN_HEARTBEAT": 5,
+        "OMNIFLOW_EXEC_TIMEOUT": 8,
+        "OMNIFLOW_LOG_JSON": "true"
+      },
+      "resources": {
+        "cpu_shares": 256,
+        "memory_limit_bytes": 268435456
+      },
+      "security": {
+        "allow_network": false,
+        "capabilities_drop": ["ALL"],
+        "sandbox_notes": "Run under Node.js worker threads or a dedicated sandbox when executing untrusted code."
+      },
+      "timeouts": {
+        "start_timeout_seconds": 15,
+        "stop_timeout_seconds": 5,
+        "exec_timeout_seconds": 8
+      }
+    },
+    {
+      "id": "omni-py-sample",
+      "display_name": "Python Sample Plugin",
+      "description": "Reference Python plugin with optional orjson dependency and safe exec timeouts.",
+      "path": "plugins/python/sample_plugin.py",
+      "run": {
+        "type": "python",
+        "command": "python3",
+        "args": ["/opt/omniflow/plugins/python/sample_plugin.py"],
+        "user": "nobody",
+        "workdir": "/opt/omniflow/plugins/python",
+        "shell": false
+      },
+      "environment": {
+        "OMNIFLOW_PLUGIN_MAX_LINE": 131072,
+        "OMNIFLOW_PLUGIN_HEARTBEAT": 5,
+        "OMNIFLOW_EXEC_TIMEOUT": 10,
+        "PYTHONUNBUFFERED": "1"
+      },
+      "resources": {
+        "cpu_shares": 256,
+        "memory_limit_bytes": 268435456
+      },
+      "security": {
+        "allow_network": false,
+        "virtualenv_recommended": true
+      },
+      "timeouts": {
+        "exec_timeout_seconds": 10
+      }
+    }
+  ],
+  "host_examples": {
+    "supervisor_systemd_unit": {
+      "description": "Minimal systemd unit example to run plugin as a service",
+      "unit_example": "[Unit]\\nDescription=OmniFlow C Plugin\\nAfter=network.target\\n[Service]\\nExecStart=/opt/omniflow/plugins/c/sample_plugin\\nRestart=on-failure\\nUser=nobody\\nGroup=nogroup\\nStandardInput=socket\\n[Install]\\nWantedBy=multi-user.target"
+    },
+    "docker_compose_snippet": {
+      "version": "3.8",
+      "services": {
+        "omni-c-sample": {
+          "image": "omniflow/plugin-c:v1.0.0",
+          "restart": "on-failure",
+          "read_only": true,
+          "environment": {
+            "OMNIFLOW_PLUGIN_MAX_LINE": "131072",
+            "OMNIFLOW_EXEC_TIMEOUT": "10"
+          },
+          "healthcheck": {
+            "test": ["CMD-SHELL", "echo '{\"id\":\"hc\",\"type\":\"health\"}' | /opt/omniflow/plugins/c/sample_plugin || exit 1"],
+            "interval": "30s",
+            "timeout": "5s",
+            "retries": 3
+          }
+        }
+      }
+    }
+  },
+  "integration_tests": {
+    "recommended_harness": "plugins/c/tests/test_sample_plugin.sh",
+    "notes": "Use the provided shell harness for the C plugin. For other languages, adapt tests to start the process, send newline-delimited JSON messages and assert responses (jq helpful). Include ASAN builds in CI."
+  },
+  "release_notes_template": {
+    "title": "Plugin integration bundle {version}",
+    "content": "This release contains prebuilt plugin artifacts and example integration configuration in plugins/common/examples/example-integration.json. Verify SBOM and signatures before deploying to production."
+  },
+  "notes_for_maintainers": {
+    "update_instructions": "When you change plugin interfaces update this example file. Keep examples in sync with README and protocol specification in plugins/common/protocol.md.",
+    "security_reminder": "Never enable network access for plugins unless explicitly required and vetted. Always sign release artifacts and publish SBOMs."
+  }
+}
