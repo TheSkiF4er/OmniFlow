@@ -48,7 +48,9 @@ plugins/cpp/
 │   └── nlohmann/json.hpp     # minimal vendored JSON (or upstream)
 └── tests/
     ├── unit/                 # GoogleTest unit tests (C++)
+        └── test_json_parsing.cpp
     └── integration/          # integration scripts (bash)
+        └── test_protocol.sh
 ```
 
 > Adjust filenames to match your codebase — the Makefile and Dockerfile try to detect common locations.
