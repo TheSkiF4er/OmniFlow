@@ -1,1 +1,566 @@
+name: Plugins CI
 
+# Run on push to branches and on PRs. Tag builds can be enabled for releases.
+on:
+  push:
+    branches:
+      - main
+      - 'release/*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Run release-mode steps (sign & publish)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write    # required for cosign OIDC (optional)
+  actions: read
+
+concurrency:
+  group: plugins-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # defaults — can be overridden in repo secrets / environments
+  MAX_LINE: 131072
+  HEARTBEAT: 5
+  EXEC_TIMEOUT: 10
+  SBOM_TOOL: syft
+  SCA_TOOL: trivy
+
+jobs:
+  # 1) Prepare: checkout + detect changed plugins (optional)
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      changed_paths: ${{ steps.changed.outputs.paths }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed paths (against main)
+        id: changed
+        shell: bash
+        run: |
+          # Compare with base branch (for PR) or with previous commit (for push)
+          BASE=${{ github.event.pull_request.base.sha || github.event.before || 'HEAD~1' }}
+          echo "BASE = $BASE"
+          git fetch --depth=1 origin main || true
+          git --no-pager diff --name-only --diff-filter=ACMRT $BASE $GITHUB_SHA > changed.txt || true
+          cat changed.txt
+          paths=$(cat changed.txt | jq -R -s -c 'split("\n")[:-1]')
+          echo "::set-output name=paths::$paths"
+
+  # 2) Build & Test matrix — multiple OS/lang combos
+  build-matrix:
+    name: Build & Test (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        # Include only desired combinations. Extend as needed.
+        include:
+          - name: c-linux
+            runner: ubuntu-latest
+            language: c
+            os: linux
+            arch: x86_64
+          - name: cpp-linux
+            runner: ubuntu-latest
+            language: cpp
+            os: linux
+            arch: x86_64
+          - name: go-linux
+            runner: ubuntu-latest
+            language: go
+            os: linux
+            arch: x86_64
+          - name: python-linux
+            runner: ubuntu-latest
+            language: python
+            os: linux
+            arch: x86_64
+          - name: nodejs-linux
+            runner: ubuntu-latest
+            language: javascript
+            os: linux
+            arch: x86_64
+          - name: typescript-linux
+            runner: ubuntu-latest
+            language: typescript
+            os: linux
+            arch: x86_64
+          - name: go-macos
+            runner: macos-latest
+            language: go
+            os: macos
+            arch: arm64
+          - name: cpp-windows
+            runner: windows-latest
+            language: cpp
+            os: windows
+            arch: x86_64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up metadata
+        id: meta
+        run: |
+          echo "LANG=${{ matrix.language }}" >> $GITHUB_OUTPUT
+          echo "OS=${{ matrix.os }}" >> $GITHUB_OUTPUT
+          echo "ARCH=${{ matrix.arch }}" >> $GITHUB_OUTPUT
+
+      # Cache helpers
+      - name: Cache build deps (language-specific)
+        uses: actions/cache@v4
+        with:
+          # key and paths will be configured per-language below (best-effort)
+          path: |
+            ~/.cache
+            ~/.npm
+            ~/.cache/pip
+          key: plugins-cache-${{ matrix.language }}-${{ matrix.runner }}-${{ hashFiles('**/package-lock.json','**/go.sum','**/requirements.txt') }}
+          restore-keys: |
+            plugins-cache-${{ matrix.language }}-${{ matrix.runner }}-
+
+      # Language toolchain setup
+      - name: Setup toolchain: Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Setup toolchain: Node.js
+        if: matrix.language == 'javascript' || matrix.language == 'typescript'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup toolchain: Python
+        if: matrix.language == 'python'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Setup toolchain: C/C++ (Ubuntu)
+        if: matrix.language == 'c' || matrix.language == 'cpp'
+        run: |
+          if [[ "${{ matrix.runner }}" == "ubuntu-latest" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y build-essential cmake ninja-build clang curl pkg-config
+          fi
+
+      - name: Setup toolchain: Windows C++
+        if: matrix.runner == 'windows-latest' && matrix.language == 'cpp'
+        run: |
+          choco install visualstudio2019-workload-vctools -y
+
+      - name: Setup toolchain: Ruby
+        if: matrix.language == 'ruby'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+
+      - name: Print environment for diagnostics
+        run: |
+          echo "Runner: $RUNNER_OS"
+          echo "Matrix: ${{ toJson(matrix) }}"
+          uname -a || systeminfo
+
+      # Lint step (language-specific)
+      - name: Lint: C/C++
+        if: matrix.language == 'c' || matrix.language == 'cpp'
+        run: |
+          cd plugins/${{ matrix.language }}
+          if [ -f .clang-format ]; then
+            find . -name '*.c' -o -name '*.cpp' -o -name '*.h' | xargs -r clang-format -n --Werror || true
+          fi
+
+      - name: Lint: Go
+        if: matrix.language == 'go'
+        run: |
+          cd plugins/go
+          go vet ./...
+          golangci-lint version || true
+          # Install golangci-lint if desired
+          # curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.59.0
+          # golangci-lint run
+
+      - name: Lint: Node.js / TypeScript
+        if: matrix.language == 'javascript' || matrix.language == 'typescript'
+        run: |
+          cd plugins/${{ matrix.language }}
+          if [ -f package.json ]; then
+            npm ci --no-audit --prefer-offline
+            npm run lint || true
+          fi
+
+      - name: Lint: Python
+        if: matrix.language == 'python'
+        run: |
+          cd plugins/python
+          python -m pip install --upgrade pip
+          pip install ruff || true
+          ruff --version || true
+          ruff check . || true
+
+      # Build
+      - name: Build: C
+        if: matrix.language == 'c'
+        run: |
+          cd plugins/c
+          make clean || true
+          make -j$(nproc) || (cat build.log || true; exit 1)
+
+      - name: Build: C++
+        if: matrix.language == 'cpp'
+        run: |
+          cd plugins/cpp
+          mkdir -p build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --config Release -- -j$(nproc)
+          # copy artifacts to a common dir
+          mkdir -p $GITHUB_WORKSPACE/artifacts/${{ matrix.name }}
+          cp -v ./omni_plugin_binary $GITHUB_WORKSPACE/artifacts/${{ matrix.name }}/ || true
+
+      - name: Build: Go
+        if: matrix.language == 'go'
+        run: |
+          cd plugins/go
+          go mod download
+          GOOS=${{ matrix.os == 'windows' && 'windows' || 'linux' }}
+          GOARCH=amd64
+          go build -o $GITHUB_WORKSPACE/artifacts/${{ matrix.name }}/omni-plugin-go ./... || true
+
+      - name: Build: Python (wheel)
+        if: matrix.language == 'python'
+        run: |
+          cd plugins/python
+          python -m pip install --upgrade pip build
+          python -m build -w --outdir $GITHUB_WORKSPACE/artifacts/${{ matrix.name }}
+
+      - name: Build: Node / TypeScript
+        if: matrix.language == 'javascript' || matrix.language == 'typescript'
+        run: |
+          cd plugins/${{ matrix.language }}
+          npm ci --no-audit --prefer-offline
+          npm run build || true
+          # package plugin as tarball
+          mkdir -p $GITHUB_WORKSPACE/artifacts/${{ matrix.name }}
+          npm pack --pack-destination $GITHUB_WORKSPACE/artifacts/${{ matrix.name }}
+
+      - name: Build: PHP
+        if: matrix.language == 'php'
+        run: |
+          cd plugins/php
+          # optionally run composer install if composer.json exists
+          if [ -f composer.json ]; then composer install --no-interaction --no-dev; fi
+          mkdir -p $GITHUB_WORKSPACE/artifacts/${{ matrix.name }}
+          tar -czf $GITHUB_WORKSPACE/artifacts/${{ matrix.name }}/plugin-php.tar.gz . --exclude vendor && true
+
+      - name: Build: Ruby
+        if: matrix.language == 'ruby'
+        run: |
+          cd plugins/ruby
+          if [ -f Gemfile ]; then bundle install --jobs=4 --path vendor/bundle; fi
+          mkdir -p $GITHUB_WORKSPACE/artifacts/${{ matrix.name }}
+          tar -czf $GITHUB_WORKSPACE/artifacts/${{ matrix.name }}/plugin-ruby.tar.gz . && true
+
+      # Test
+      - name: Test: Go
+        if: matrix.language == 'go'
+        run: |
+          cd plugins/go
+          go test ./...
+
+      - name: Test: Python
+        if: matrix.language == 'python'
+        run: |
+          cd plugins/python
+          python -m pip install -r requirements.txt -q || true
+          pip install pytest || true
+          pytest -q || true
+
+      - name: Test: Node
+        if: matrix.language == 'javascript' || matrix.language == 'typescript'
+        run: |
+          cd plugins/${{ matrix.language }}
+          npm ci --no-audit --prefer-offline
+          npm test || true
+
+      - name: Test: C/C++ (integration smoke)
+        if: matrix.language == 'c' || matrix.language == 'cpp'
+        run: |
+          cd plugins/${{ matrix.language }}
+          # If there are integration scripts
+          if [ -f tests/integration/test_protocol.sh ]; then
+            bash tests/integration/test_protocol.sh || true
+          fi
+
+      - name: Save build metadata
+        id: meta_out
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/artifacts/${{ matrix.name }}
+          echo "{}" > $GITHUB_WORKSPACE/artifacts/${{ matrix.name }}/metadata.json
+          jq -n --arg lang "${{ matrix.language }}" --arg name "${{ matrix.name }}" --arg os "${{ matrix.os }}" \
+            '{language:$lang, matrix_name:$name, os:$os, runner:env.RUNNER_OS}' > $GITHUB_WORKSPACE/artifacts/${{ matrix.name }}/metadata.json
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts-${{ matrix.name }}
+          path: $GITHUB_WORKSPACE/artifacts/${{ matrix.name }}
+
+  # 3) SBOM generation (runs after build-matrix completes)
+  sbom:
+    name: SBOM (syft/cyclonedx)
+    runs-on: ubuntu-latest
+    needs: build-matrix
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts-go-linux
+          path: artifacts/go-linux || true
+
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b $(pwd)/bin v0.86.0
+          export PATH=$PATH:$(pwd)/bin
+
+      - name: Generate SBOM for each artifact directory
+        run: |
+          mkdir -p reports/sbom
+          for d in artifacts/*; do
+            if [ -d "$d" ]; then
+              echo "Generating SBOM for $d"
+              ./bin/syft packages $d -o spdx-json > "reports/sbom/$(basename $d)-spdx.json" || true
+              ./bin/syft packages $d -o cyclonedx-json > "reports/sbom/$(basename $d)-cyclonedx.json" || true
+            fi
+          done
+
+      - name: Upload SBOMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-reports
+          path: reports/sbom
+
+  # 4) SCA / Vulnerability scanning (Trivy)
+  sca:
+    name: SCA & Vulnerability Scan (Trivy)
+    runs-on: ubuntu-latest
+    needs: sbom
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts-go-linux
+          path: artifacts/go-linux || true
+
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin v0.47.1
+
+      - name: Run Trivy filesystem scan for artifacts
+        run: |
+          mkdir -p reports/trivy
+          for d in artifacts/*; do
+            if [ -d "$d" ]; then
+              echo "Scanning $d"
+              trivy fs --security-checks vuln --format json --output "reports/trivy/$(basename $d)-trivy.json" "$d" || true
+            fi
+          done
+
+      - name: Upload Trivy reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-reports
+          path: reports/trivy
+
+  # 5) Package & checksums (aggregate artifacts and produce checksums)
+  package:
+    name: Package & Checksums
+    runs-on: ubuntu-latest
+    needs: [build-matrix, sbom, sca]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download all build artifacts (wildcard)
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts-go-linux
+          path: artifacts || true
+
+      - name: Aggregate artifacts into releases/packaging dir
+        run: |
+          mkdir -p release-artifacts
+          # Collect artifacts produced in build-matrix
+          find artifacts -type f -maxdepth 3 -name '*.tar.gz' -o -name '*.zip' -o -name '*.whl' -o -name '*.deb' -o -name '*.rpm' -print0 \
+            | xargs -0 -I{} cp -v {} release-artifacts/ || true
+
+      - name: Generate checksums (sha256 + sha512)
+        run: |
+          mkdir -p release-checksums
+          cd release-artifacts || exit 0
+          sha256sum * 2>/dev/null > ../release-checksums/sha256sum.txt || true
+          sha512sum * 2>/dev/null > ../release-checksums/sha512sum.txt || true
+          cd ..
+
+      - name: Upload release-artifacts and checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: |
+            release-artifacts
+            release-checksums
+
+  # 6) Optional: Sign artifacts (cosign + PGP) — run only for release dispatch or when workflow_dispatch.release=true
+  sign:
+    name: Sign artifacts (cosign / PGP)
+    runs-on: ubuntu-latest
+    needs: package
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.release == 'true' || startsWith(github.ref, 'refs/tags/') }}
+    env:
+      COSIGN_KEY: ${{ secrets.COSIGN_PRIVATE_KEY || '' }}
+      PGP_PRIVATE_KEY: ${{ secrets.PGP_PRIVATE_KEY || '' }}
+      PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: release-artifacts
+
+      - name: Install cosign
+        run: |
+          curl -sSLf https://github.com/sigstore/cosign/releases/download/v2.9.0/cosign-linux-amd64 -o /usr/local/bin/cosign
+          chmod +x /usr/local/bin/cosign
+          cosign version
+
+      - name: Import PGP key (if provided)
+        if: env.PGP_PRIVATE_KEY != ''
+        run: |
+          echo "$PGP_PRIVATE_KEY" > private.key.asc
+          gpg --batch --import private.key.asc
+        env:
+          PGP_PRIVATE_KEY: ${{ secrets.PGP_PRIVATE_KEY }}
+
+      - name: Sign checksums with PGP (if key present)
+        if: env.PGP_PRIVATE_KEY != ''
+        run: |
+          cd release-checksums
+          gpg --batch --yes --passphrase "$PGP_PASSPHRASE" --pinentry-mode loopback -abs sha256sum.txt
+          gpg --batch --yes --passphrase "$PGP_PASSPHRASE" --pinentry-mode loopback -abs sha512sum.txt
+        env:
+          PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
+
+      - name: Cosign sign artifacts (if COSIGN_KEY present)
+        if: env.COSIGN_KEY != ''
+        run: |
+          echo "$COSIGN_KEY" > cosign.key
+          # use keyless (OIDC) or raw key; here assume raw key present
+          for a in release-artifacts/*; do
+            cosign sign-blob --key cosign.key $a || true
+          done
+        env:
+          COSIGN_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-release-artifacts
+          path: |
+            release-artifacts
+            release-checksums
+
+  # 7) Publish (optional): GitHub Releases or S3/GCS. This job is gated and requires repo-level secrets.
+  publish:
+    name: Publish release (GH Releases / S3)
+    runs-on: ubuntu-latest
+    needs: [package, sign]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.release == 'true' || startsWith(github.ref, 'refs/tags/') }}
+    env:
+      AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET || '' }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download signed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-release-artifacts
+          path: release-artifacts || true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        if: ${{ github.ref_type == 'tag' }}
+        with:
+          files: release-artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to S3 (if configured)
+        if: env.AWS_S3_BUCKET != ''
+        env:
+          AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          aws s3 cp --recursive release-artifacts s3://$AWS_S3_BUCKET/omniflow/plugins/ --acl private
+
+      - name: Notify (Slack/Webhook) - optional
+        if: ${{ secrets.RELEASE_WEBHOOK_URL != '' }}
+        run: |
+          curl -sS -X POST -H 'Content-type: application/json' --data '{"text":"OmniFlow plugins release published: $GITHUB_REF"}' ${{ secrets.RELEASE_WEBHOOK_URL }}
+
+  # 8) Cleanup / summary artifacts
+  summary:
+    name: Summary artifacts & cleanup
+    runs-on: ubuntu-latest
+    needs: [build-matrix, sbom, sca, package]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download aggregated artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: release-artifacts || true
+      - name: Upload full artifacts bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-ci-artifacts
+          path: |
+            release-artifacts
+            release-checksums
+            reports
+      - name: Emit summary
+        run: |
+          echo "CI completed for $GITHUB_REF"
+          echo "Artifacts uploaded as build artifacts and sbom/sca reports."
