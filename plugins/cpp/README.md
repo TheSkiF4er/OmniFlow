@@ -46,9 +46,9 @@ plugins/cpp/
 ├── sample_plugin.cpp         # main plugin source (example name)
 ├── third_party/
 │   └── nlohmann/json.hpp     # minimal vendored JSON (or upstream)
-├── tests/
-│   ├── unit/                 # GoogleTest unit tests (C++)
-│   └── integration/          # integration scripts (bash)
+└── tests/
+    ├── unit/                 # GoogleTest unit tests (C++)
+    └── integration/          # integration scripts (bash)
 ```
 
 > Adjust filenames to match your codebase — the Makefile and Dockerfile try to detect common locations.
