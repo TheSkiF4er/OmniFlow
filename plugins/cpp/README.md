@@ -43,7 +43,7 @@ plugins/cpp/
 ├── Makefile                  # Convenience build tasks (fallback)
 ├── Dockerfile                # Multi-stage builder → minimal runtime
 ├── README.md                 # (this file)
-├── omni_plugin_cpp.cpp       # main plugin source (example name)
+├── sample_plugin.cpp         # main plugin source (example name)
 ├── include/                  # public headers (if any)
 ├── third_party/
 │   └── nlohmann/json.hpp     # minimal vendored JSON (or upstream)
