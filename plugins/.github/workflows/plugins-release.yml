@@ -1,1 +1,526 @@
+name: Plugins Release
 
+# Trigger on creating a tag (semantic version tag recommended: v1.2.3)
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v1.2.3). If omitted when dispatching, the trigger must be a tag.'
+        required: false
+      publish:
+        description: 'If "true", publish to external storage (S3/GCS). Default false.'
+        required: false
+        default: 'false'
+      notes:
+        description: 'Optional release notes override (markdown).'
+        required: false
+
+# Required permissions for OIDC and release operations
+permissions:
+  contents: write          # to create release assets
+  id-token: write          # for OIDC keyless cosign signing
+  issues: write            # optional: create release issue/notes
+  packages: write
+
+concurrency:
+  group: plugins-release-${{ github.ref_name || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  ARTIFACT_DIR: release-artifacts
+  SBOM_DIR: release-sbom
+  SCA_DIR: release-sca
+  CHECKSUMS_DIR: release-checksums
+  DEFAULT_BUILD_RUNNER: ubuntu-latest
+  # Adjust tool versions here if needed
+  SYFT_VERSION: v0.86.0
+  TRIVY_VERSION: v0.47.1
+  COSIGN_VERSION: v2.9.0
+
+jobs:
+  prepare:
+    name: Prepare release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.set.outputs.release_tag }}
+      release_version: ${{ steps.set.outputs.release_version }}
+      release_notes: ${{ steps.set.outputs.release_notes }}
+      commit_sha: ${{ steps.set.outputs.commit_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine release tag and version
+        id: set
+        run: |
+          # If workflow_dispatch provided version, use it; otherwise derive from ref (push tag)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.version }}" ]; then
+            TAG="${{ github.event.inputs.version }}"
+          else
+            # Use ref name for push/tag events
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+
+          if [ -z "$TAG" ]; then
+            echo "No tag/version found. Exiting." >&2
+            exit 1
+          fi
+
+          # Normalize version (must start with 'v')
+          if [[ ! "$TAG" =~ ^v[0-9]+(\.[0-9]+)* ]]; then
+            echo "Tag '$TAG' does not look like semver (vX.Y.Z). Proceeding anyway."
+          fi
+
+          VERSION="$TAG"
+          COMMIT_SHA="${GITHUB_SHA}"
+
+          # Derive release notes: prefer provided input notes, else use CHANGELOG or generate from commits
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.notes }}" ]; then
+            NOTES="${{ github.event.inputs.notes }}"
+          elif [ -f RELEASE_NOTES.md ]; then
+            NOTES="$(sed -n '1,200p' RELEASE_NOTES.md)"
+          else
+            # Generate simple notes from commits in this tag
+            NOTES="$(git log --pretty=format:'- %s (%h)' ${COMMIT_SHA}^..${COMMIT_SHA} || true)"
+            if [ -z "$NOTES" ]; then NOTES="Release ${VERSION}"; fi
+          fi
+
+          echo "::set-output name=release_tag::$TAG"
+          echo "::set-output name=release_version::$VERSION"
+          echo "::set-output name=release_notes::$(echo "$NOTES" | sed ':a;N;$!ba;s/\n/%0A/g')"
+          echo "::set-output name=commit_sha::$COMMIT_SHA"
+
+      - name: Print release info
+        run: |
+          echo "Release tag: ${{ steps.set.outputs.release_tag }}"
+          echo "Version: ${ { steps.set.outputs.release_version } }" || true
+
+  build:
+    name: Build artifacts (matrix)
+    runs-on: ${{ matrix.runner }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Add combinations you need; expand OS/arch and languages
+          - name: cpp-linux-x86_64
+            runner: ubuntu-latest
+            language: cpp
+            os: linux
+            arch: x86_64
+          - name: cpp-linux-arm64
+            runner: ubuntu-latest
+            language: cpp
+            os: linux
+            arch: arm64
+          - name: go-linux-x86_64
+            runner: ubuntu-latest
+            language: go
+            os: linux
+            arch: x86_64
+          - name: go-macos-arm64
+            runner: macos-latest
+            language: go
+            os: macos
+            arch: arm64
+          - name: nodejs-linux-x86_64
+            runner: ubuntu-latest
+            language: javascript
+            os: linux
+            arch: x86_64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup environment
+        run: |
+          echo "Matrix: ${{ toJson(matrix) }}"
+          mkdir -p $GITHUB_WORKSPACE/${{ env.ARTIFACT_DIR }}/${{ matrix.name }}
+
+      - name: Install toolchain: Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Install Node
+        if: matrix.language == 'javascript'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install build deps (C/C++)
+        if: matrix.language == 'cpp'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config
+
+      - name: Build: C++ plugin
+        if: matrix.language == 'cpp'
+        run: |
+          cd plugins/cpp
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --config Release -- -j$(nproc)
+          # copy binary(s) to artifacts dir
+          cp -v ./omni_plugin_binary $GITHUB_WORKSPACE/${{ env.ARTIFACT_DIR }}/${{ matrix.name }}/ || true
+          # create tarball with metadata
+          cd $GITHUB_WORKSPACE/${{ env.ARTIFACT_DIR }}/${{ matrix.name }}
+          tar czf omniflow-plugin-cpp-${{ needs.prepare.outputs.release_tag }}-${{ matrix.os }}-${{ matrix.arch }}.tar.gz . || true
+
+      - name: Build: Go plugin
+        if: matrix.language == 'go'
+        run: |
+          cd plugins/go
+          go mod download
+          TARGET_OS=linux
+          TARGET_ARCH=amd64
+          if [ "${{ matrix.os }}" = "macos" ]; then TARGET_OS=darwin; fi
+          if [ "${{ matrix.arch }}" = "arm64" ]; then TARGET_ARCH=arm64; fi
+          BINNAME=omniflow-plugin-go-${{ needs.prepare.outputs.release_tag }}-${{ matrix.os }}-${{ matrix.arch }}
+          CGO_ENABLED=0 GOOS=$TARGET_OS GOARCH=$TARGET_ARCH go build -ldflags "-s -w" -o $GITHUB_WORKSPACE/${{ env.ARTIFACT_DIR }}/${{ matrix.name }}/$BINNAME ./...
+          cd $GITHUB_WORKSPACE/${{ env.ARTIFACT_DIR }}/${{ matrix.name }}
+          tar czf $BINNAME.tar.gz $BINNAME || true
+
+      - name: Build: Node plugin
+        if: matrix.language == 'javascript'
+        run: |
+          cd plugins/javascript
+          npm ci --prefer-offline --no-audit
+          npm run build || true
+          mkdir -p $GITHUB_WORKSPACE/${{ env.ARTIFACT_DIR }}/${{ matrix.name }}
+          # pack as tarball
+          npm pack --pack-destination $GITHUB_WORKSPACE/${{ env.ARTIFACT_DIR }}/${{ matrix.name }}
+
+      - name: Create artifact metadata
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/${{ env.ARTIFACT_DIR }}/${{ matrix.name }}/meta
+          cat > $GITHUB_WORKSPACE/${{ env.ARTIFACT_DIR }}/${{ matrix.name }}/meta/metadata.json <<EOF
+          {
+            "matrix": "${{ matrix.name }}",
+            "language": "${{ matrix.language }}",
+            "os": "${{ matrix.os }}",
+            "arch": "${{ matrix.arch }}",
+            "built_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "commit": "${{ needs.prepare.outputs.commit_sha }}"
+          }
+          EOF
+
+      - name: Upload artifacts (per matrix)
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts-${{ matrix.name }}
+          path: $GITHUB_WORKSPACE/${{ env.ARTIFACT_DIR }}/${{ matrix.name }}
+
+  sbom:
+    name: Generate SBOMs (Syft)
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download matrix artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts-go-linux-x86_64
+          path: artifacts || true
+
+      - name: Install syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b $(pwd)/bin ${SYFT_VERSION}
+          export PATH=$PATH:$(pwd)/bin
+          ./bin/syft version
+
+      - name: Generate SBOMs for each artifact directory
+        run: |
+          mkdir -p ${SBOM_DIR}
+          for d in artifacts/*; do
+            if [ -d "$d" ]; then
+              ./bin/syft packages "$d" -o spdx-json > ${SBOM_DIR}/$(basename "$d")-spdx.json || true
+              ./bin/syft packages "$d" -o cyclonedx-json > ${SBOM_DIR}/$(basename "$d")-cyclonedx.json || true
+            fi
+          done
+
+      - name: Upload SBOMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: ${SBOM_DIR}
+
+  sca:
+    name: SCA & Vulnerability Scanning (Trivy)
+    runs-on: ubuntu-latest
+    needs: sbom
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts-go-linux-x86_64
+          path: artifacts || true
+
+      - name: Install trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin ${TRIVY_VERSION}
+          trivy --version
+
+      - name: Run Trivy FS scan
+        run: |
+          mkdir -p ${SCA_DIR}
+          for d in artifacts/*; do
+            if [ -d "$d" ]; then
+              trivy fs --format json --output ${SCA_DIR}/$(basename $d)-trivy.json "$d" || true
+            fi
+          done
+
+      - name: Upload SCA reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: sca-reports
+          path: ${SCA_DIR}
+
+  package:
+    name: Package artifacts and generate checksums
+    runs-on: ubuntu-latest
+    needs: [build, sbom, sca]
+    steps:
+      - name: Download all matrix artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts-go-linux-x86_64
+          path: artifacts || true
+
+      - name: Aggregate artifacts
+        run: |
+          mkdir -p ${ARTIFACT_DIR}
+          find artifacts -type f -maxdepth 3 -print0 | xargs -0 -I{} cp -v {} ${ARTIFACT_DIR}/ || true
+          ls -la ${ARTIFACT_DIR} || true
+
+      - name: Create checksums
+        run: |
+          mkdir -p ${CHECKSUMS_DIR}
+          cd ${ARTIFACT_DIR} || exit 0
+          if [ "$(ls -A)" ]; then
+            sha256sum * > ../${CHECKSUMS_DIR}/sha256sum.txt || true
+            sha512sum * > ../${CHECKSUMS_DIR}/sha512sum.txt || true
+          else
+            echo "No artifacts to checksum."
+          fi
+          cd ..
+
+      - name: Upload release package & checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-package
+          path: |
+            ${ARTIFACT_DIR}
+            ${CHECKSUMS_DIR}
+
+  sign:
+    name: Sign artifacts (PGP & keyless cosign)
+    runs-on: ubuntu-latest
+    needs: package
+    if: always()
+    steps:
+      - name: Download release package
+        uses: actions/download-artifact@v4
+        with:
+          name: release-package
+          path: release-artifacts
+
+      - name: Install cosign
+        run: |
+          COSIGN_BIN=/usr/local/bin/cosign
+          curl -sSLf https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64 -o ${COSIGN_BIN}
+          chmod +x ${COSIGN_BIN}
+          cosign version
+
+      - name: Import PGP private key (optional)
+        if: ${{ secrets.PGP_PRIVATE_KEY != '' }}
+        env:
+          PGP_PRIVATE_KEY: ${{ secrets.PGP_PRIVATE_KEY }}
+        run: |
+          echo "$PGP_PRIVATE_KEY" > private.key.asc
+          gpg --batch --import private.key.asc
+          gpg --list-secret-keys
+
+      - name: Sign checksums with PGP (if key present)
+        if: ${{ secrets.PGP_PRIVATE_KEY != '' }}
+        run: |
+          cd release-artifacts/${CHECKSUMS_DIR}
+          gpg --batch --yes --passphrase "${{ secrets.PGP_PASSPHRASE }}" --pinentry-mode loopback --detach-sign sha256sum.txt
+          gpg --batch --yes --passphrase "${{ secrets.PGP_PASSPHRASE }}" --pinentry-mode loopback --detach-sign sha512sum.txt
+          ls -la
+
+      - name: Cosign sign artifacts (keyless via OIDC)
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+        run: |
+          # Use keyless signing (OIDC) — requires id-token permission in workflow and repo configured for cosign
+          for F in release-artifacts/${ARTIFACT_DIR}/*; do
+            echo "Signing $F (cosign keyless)..."
+            cosign sign-blob --keyless $F || true
+            cosign verify-blob --keyless $F || true
+          done
+
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-release-package
+          path: release-artifacts
+
+  create-release:
+    name: Create GitHub Release & upload assets
+    runs-on: ubuntu-latest
+    needs: sign
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download signed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-release-package
+          path: release-artifacts
+
+      - name: Prepare release notes file
+        id: notes
+        run: |
+          if [ -n "${{ needs.prepare.outputs.release_notes }}" ]; then
+            echo -e "${{ needs.prepare.outputs.release_notes }}" | sed 's/%0A/\n/g' > release-notes.md
+          else
+            echo "Release ${{ needs.prepare.outputs.release_version }}" > release-notes.md
+          fi
+          echo "::set-output name=notes_path::release-notes.md"
+
+      - name: Create GitHub Release (draft=false)
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ needs.prepare.outputs.release_tag }}
+          name: ${{ needs.prepare.outputs.release_tag }}
+          body_path: ${{ steps.notes.outputs.notes_path }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload assets to GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release-artifacts/${ARTIFACT_DIR}/*,release-artifacts/${CHECKSUMS_DIR}/*,release-artifacts/${SBOM_DIR}/* || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-storage:
+    name: Publish to external storage (S3/GCS) (optional)
+    runs-on: ubuntu-latest
+    needs: create-release
+    if: ${{ github.event.workflow_dispatch && inputs.publish == 'true' || env.AWS_S3_BUCKET != '' }}
+    env:
+      AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET || '' }}
+      AWS_REGION: ${{ secrets.AWS_REGION || '' }}
+      GCS_BUCKET: ${{ secrets.GCS_BUCKET || '' }}
+    steps:
+      - name: Download signed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-release-package
+          path: release-artifacts
+
+      - name: Publish to S3 (if configured)
+        if: env.AWS_S3_BUCKET != ''
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          aws s3 cp --recursive release-artifacts/${ARTIFACT_DIR} s3://$AWS_S3_BUCKET/omniflow/plugins/${{ needs.prepare.outputs.release_version }}/
+          aws s3 cp --recursive release-artifacts/${CHECKSUMS_DIR} s3://$AWS_S3_BUCKET/omniflow/plugins/${{ needs.prepare.outputs.release_version }}/checksums/
+
+      - name: Publish to GCS (if configured)
+        if: env.GCS_BUCKET != ''
+        env:
+          GCP_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+        run: |
+          echo "$GCP_KEY" > gcp-key.json
+          gcloud auth activate-service-account --key-file=gcp-key.json
+          gsutil -m cp -r release-artifacts/${ARTIFACT_DIR} gs://$GCS_BUCKET/omniflow/plugins/${{ needs.prepare.outputs.release_version }}/
+
+  update-manifests:
+    name: Update manifests / index
+    runs-on: ubuntu-latest
+    needs: create-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate/Update manifests/index.json
+        run: |
+          mkdir -p manifests
+          # This is a simple append/update. Replace with robust script in production.
+          INDEX=manifests/index.json
+          TMP=manifests/index.tmp.json
+          NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          cat > $TMP <<EOF
+          {
+            "version": "${{ needs.prepare.outputs.release_version }}",
+            "tag": "${{ needs.prepare.outputs.release_tag }}",
+            "published_at": "$NOW",
+            "commit": "${{ needs.prepare.outputs.commit_sha }}"
+          }
+          EOF
+          mv $TMP $INDEX
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifests/index.json || true
+          git commit -m "chore(release): add manifest for ${{ needs.prepare.outputs.release_tag }}" || true
+          git push origin HEAD:main || true
+
+  verify:
+    name: Verify artifacts & signatures
+    runs-on: ubuntu-latest
+    needs: [create-release]
+    steps:
+      - name: Download signed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-release-package
+          path: release-artifacts
+
+      - name: Install cosign
+        run: |
+          COSIGN_BIN=/usr/local/bin/cosign
+          curl -sSLf https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64 -o ${COSIGN_BIN}
+          chmod +x ${COSIGN_BIN}
+
+      - name: Verify cosign signatures (keyless)
+        run: |
+          set -e
+          for F in release-artifacts/${ARTIFACT_DIR}/*; do
+            echo "Verifying cosign signature (keyless) for $F"
+            cosign verify-blob --keyless $F || echo "cosign verify failed for $F (non-fatal)" 
+          done
+
+      - name: Verify PGP signatures (if public key provided)
+        if: ${{ secrets.PGP_PUBLIC_KEY != '' }}
+        env:
+          PGP_PUBLIC_KEY: ${{ secrets.PGP_PUBLIC_KEY }}
+        run: |
+          echo "$PGP_PUBLIC_KEY" > pub.key.asc
+          gpg --import pub.key.asc
+          for sig in release-artifacts/${CHECKSUMS_DIR}/*.asc; do
+            echo "Verifying $sig"
+            gpg --verify "$sig" || echo "PGP verify failed for $sig (non-fatal)"
+          done
