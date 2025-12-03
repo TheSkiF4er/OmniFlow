@@ -1,6 +1,6 @@
 # OmniFlow Go Plugin
 
-**Production-Ready Plugin Framework for OmniFlow**
+**Production-Ready Plugin for OmniFlow**
 
 The **OmniFlow Go Plugin** provides a clean, robust, and developer-friendly environment for building high-performance OmniFlow plugins using the Go programming language.
 This module implements the unified OmniFlow Plugin Protocol and includes tooling, examples, tests, and containerization files required for reliable production usage.
