@@ -1,12 +1,8 @@
-Конечно! Ниже — полностью готовый, лучший и профессионально оформленный **OmniFlow/plugins/go/README.md** на английском языке, оформленный как документ для реального релиза.
-
----
-
-# OmniFlow Go Plugin SDK
+# OmniFlow Go Plugin
 
 **Production-Ready Plugin Framework for OmniFlow**
 
-The **OmniFlow Go Plugin SDK** provides a clean, robust, and developer-friendly environment for building high-performance OmniFlow plugins using the Go programming language.
+The **OmniFlow Go Plugin** provides a clean, robust, and developer-friendly environment for building high-performance OmniFlow plugins using the Go programming language.
 This module implements the unified OmniFlow Plugin Protocol and includes tooling, examples, tests, and containerization files required for reliable production usage.
 
 ---
