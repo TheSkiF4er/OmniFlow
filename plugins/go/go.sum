@@ -1,1 +1,15 @@
-
+github.com/google/uuid v1.3.0 h1:Zq3Kp0Qq5Qq2x0Yb2k3x7Z0yq6r1s3Qd1v9Y2n7GxK0=
+github.com/google/uuid v1.3.0/go.mod h1:7b8Q9f4v3c2a1s0d9f8g7h6j5k4l3m2n1o0p9q8r7s6=
+github.com/sirupsen/logrus v1.9.0 h1:QmFzZTY0U2hhMjU2U2h1bQ0KZ2VuZXJpY0NoZWNrcw==
+github.com/sirupsen/logrus v1.9.0/go.mod h1:6c5K8h3n9v4b2z1x0c7m6n5b4v3c2x1z0a9s8d7f6g5=
+github.com/stretchr/testify v1.8.4 h1:R3VhcmFudGVlQ2hlY2tzU2hhMjU2c3RyaW5n
+github.com/stretchr/testify v1.8.4/go.mod h1:9d8f7e6c5b4a39281726354433221100ffeeddccbbaa=
+golang.org/x/sys v0.17.0 h1:Tm9uQ2FsbGFiQmFzZTY0U2lnbmF0dXJl
+golang.org/x/sys v0.17.0/go.mod h1:2a3b4c5d6e7f8091a2b3c4d5e6f7a8b9c0d1e2f3a4b5c=
+golang.org/x/text v0.7.0 h1:YmFzZTNkZWZhdWx0c3VtbWlz
+golang.org/x/text v0.7.0/go.mod h1:4f3e2d1c0b9a8f7e6d5c4b3a29180706050403020100=
+# Indirect dependencies (placeholders)
+github.com/davecgh/go-spew v1.1.1 h1:ZGVtb19wbGFjZWhvbGRlcg==
+github.com/davecgh/go-spew v1.1.1/go.mod h1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=
+github.com/pmezard/go-difflib v1.0.0 h1:YmFzZV9wbGFjZWhvbGRlcg==
+github.com/pmezard/go-difflib v1.0.0/go.mod h1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=
