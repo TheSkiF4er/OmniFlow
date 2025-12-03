@@ -1,1 +1,106 @@
-
+{
+  "root": true,
+  "env": {
+    "node": true,
+    "es2021": true,
+    "jest": true
+  },
+  "parserOptions": {
+    "ecmaVersion": 2021,
+    "sourceType": "module"
+  },
+  "plugins": [
+    "security",
+    "jest",
+    "unicorn",
+    "promise",
+    "node"
+  ],
+  "extends": [
+    "eslint:recommended",
+    "plugin:node/recommended",
+    "plugin:security/recommended",
+    "plugin:jest/recommended",
+    "plugin:unicorn/recommended",
+    "plugin:promise/recommended",
+    "prettier"
+  ],
+  "rules": {
+    "curly": ["error", "all"],
+    "eqeqeq": ["error", "always", { "null": "ignore" }],
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+    "no-console": ["warn", { "allow": ["warn", "error", "info"] }],
+    "no-process-exit": "off",
+    "no-underscore-dangle": "off",
+    "unicorn/prevent-abbreviations": [
+      "warn",
+      {
+        "replacements": {
+          "ctx": false,
+          "env": false
+        }
+      }
+    ],
+    "unicorn/filename-case": [
+      "warn",
+      {
+        "cases": {
+          "camelCase": true,
+          "pascalCase": true,
+          "kebabCase": true
+        }
+      }
+    ],
+    "promise/always-return": "error",
+    "promise/catch-or-return": "error",
+    "security/detect-object-injection": "off",
+    "node/no-extraneous-import": [
+      "error",
+      {
+        "allowModules": [],
+        "resolvePaths": ["."]
+      }
+    ],
+    "node/no-missing-require": [
+      "error",
+      {
+        "allowModules": [],
+        "tryExtensions": [".js", ".json", ".node"]
+      }
+    ],
+    "jest/no-done-callback": "error",
+    "jest/expect-expect": [
+      "error",
+      {
+        "assertFunctionNames": ["expect", "request"]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["**/__tests__/**/*.js", "**/*.test.js", "**/*.spec.js"],
+      "env": {
+        "jest": true
+      },
+      "rules": {
+        "no-unused-expressions": "off",
+        "unicorn/prevent-abbreviations": "off"
+      }
+    },
+    {
+      "files": ["scripts/**", "bin/**"],
+      "env": {
+        "node": true
+      },
+      "rules": {
+        "node/shebang": "off",
+        "unicorn/prevent-abbreviations": "off"
+      }
+    }
+  ],
+  "settings": {
+    "node": {
+      "tryExtensions": [".js", ".json", ".node"]
+    }
+  }
+}
