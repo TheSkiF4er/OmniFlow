@@ -1,1 +1,248 @@
-
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2025-12-03T00:00:00Z",
+  "example_name": "C → Python Plugin Integration Example",
+  "description": "End-to-end integration example demonstrating a host (or host-emulator) sending NDJSON requests to a C plugin which forwards work to a Python helper plugin and returns aggregated results. This file is a ready-to-use template for wiring C and Python plugins in OmniFlow, including configuration, sample messages, healthchecks, expected responses and troubleshooting tips.",
+  "maintainer": {
+    "name": "TheSkiF4er / OmniFlow",
+    "contact": "maintainers@omniflow.example",
+    "license": "Apache-2.0"
+  },
+  "overview": {
+    "purpose": "Demonstrate how a C plugin can coordinate with a Python plugin to perform an 'analyze' action. The C plugin acts as the primary registered plugin for the host; for heavy or dynamic work it calls a Python plugin (either via subprocess, unix socket, or containerized RPC). This example shows the recommended NDJSON request/response flow, environment configuration, and expected JSON payloads.",
+    "assumptions": [
+      "Both plugins implement the OmniFlow NDJSON protocol (one JSON object per line on stdin/stdout).",
+      "Plugins run as separate processes/containers and the host wires them together (the C plugin can spawn or call the Python plugin).",
+      "OMNIFLOW_PLUGIN_MAX_LINE is enforced by host and plugins (default 131072 bytes)."
+    ]
+  },
+  "global_defaults": {
+    "OMNIFLOW_PLUGIN_MAX_LINE": 131072,
+    "OMNIFLOW_EXEC_TIMEOUT": 10,
+    "OMNIFLOW_PLUGIN_HEARTBEAT": 5,
+    "OMNIFLOW_LOG_JSON": "false",
+    "restart_policy": "on-failure"
+  },
+  "host_integration": {
+    "how_to_start": [
+      "Start Python plugin container / process first (if the C plugin expects it to be available).",
+      "Start the C plugin process and confirm readiness with a health request.",
+      "Host may supervise both processes (systemd, container orchestrator) and wire environment variables."
+    ],
+    "healthcheck_example": {
+      "command": "echo '{\"id\":\"hc-1\",\"type\":\"health\",\"payload\":null}' | /opt/omniflow/bin/sample_plugin_c",
+      "expected_response": {
+        "id": "hc-1",
+        "status": "ok",
+        "code": 0,
+        "body": {
+          "status": "healthy",
+          "version": "1.0.0"
+        }
+      }
+    },
+    "supervisor_note": "If using containers, use the Dockerfile/compose examples from plugins/common/examples, run plugins as non-root and ensure read-only rootfs where possible."
+  },
+  "c_plugin": {
+    "id": "omni-c-analyzer",
+    "path": "plugins/c/sample_plugin",
+    "description": "Primary plugin in C. Accepts host requests and for 'analyze' actions forwards payload to the Python helper plugin and aggregates results. Enforces input size, performs basic validation and responds in NDJSON.",
+    "env": {
+      "OMNIFLOW_PLUGIN_MAX_LINE": 131072,
+      "OMNIFLOW_EXEC_TIMEOUT": 12,
+      "OMNIFLOW_LOG_JSON": "false",
+      "PY_PLUGIN_ENDPOINT": "unix:///tmp/omniflow/py.sock",
+      "PY_PLUGIN_CMD": "/opt/omniflow/plugins/python/sample_plugin.py"
+    },
+    "runtime": {
+      "container_image": "omniflow/plugin-c:latest",
+      "entrypoint": "/opt/omniflow/bin/sample_plugin",
+      "user": "omniflow"
+    },
+    "security": {
+      "drop_capabilities": ["ALL"],
+      "seccomp_profile": "default",
+      "allow_network": false
+    },
+    "notes": [
+      "C plugin should not perform untrusted scripting; offload to a language runtime plugin if needed.",
+      "The forwarding mechanism can be implemented via: a) spawning the Python process and communicating via pipes, b) sending HTTP/JSON to a local socket the Python plugin opens, or c) using a small RPC over a unix domain socket."
+    ]
+  },
+  "python_plugin": {
+    "id": "omni-py-helper",
+    "path": "plugins/python/sample_plugin.py",
+    "description": "Python helper plugin that implements action handlers (e.g., 'classify', 'enrich') and accepts a small JSON payload; returns result JSON. Built to be lightweight and safe (no shell execution).",
+    "env": {
+      "OMNIFLOW_PLUGIN_MAX_LINE": 131072,
+      "OMNIFLOW_EXEC_TIMEOUT": 8,
+      "OMNIFLOW_LOG_JSON": "true"
+    },
+    "runtime": {
+      "container_image": "omniflow/plugin-py:latest",
+      "entrypoint": "python3 /opt/omniflow/plugins/python/sample_plugin.py",
+      "user": "omniflow"
+    },
+    "security": {
+      "virtualenv_recommended": true,
+      "allow_network": false
+    },
+    "notes": [
+      "Prefer using builtin libraries and pinned dependencies. If using external ML models, mount them as read-only files and enforce memory limits."
+    ]
+  },
+  "integration_flow_examples": [
+    {
+      "name": "Simple analyze (forward to Python)",
+      "description": "Host sends 'analyze' exec request to C plugin; C plugin forwards `payload.document` to Python helper; Python returns `classification` & `confidence`; C plugin wraps the helper response and returns to host.",
+      "host_request": {
+        "id": "an-100",
+        "type": "exec",
+        "payload": {
+          "action": "analyze",
+          "args": {
+            "document": "OmniFlow is a modular host/plug-in framework."
+          }
+        }
+      },
+      "c_plugin_forward_to_python": {
+        "id": "pycall-100",
+        "type": "exec",
+        "payload": {
+          "action": "classify",
+          "args": {
+            "text": "OmniFlow is a modular host/plug-in framework."
+          }
+        }
+      },
+      "python_response": {
+        "id": "pycall-100",
+        "status": "ok",
+        "code": 0,
+        "body": {
+          "action": "classify",
+          "classification": "infrastructure",
+          "confidence": 0.93
+        }
+      },
+      "c_plugin_response_to_host_expected": {
+        "id": "an-100",
+        "status": "ok",
+        "code": 0,
+        "body": {
+          "action": "analyze",
+          "result": {
+            "classification": "infrastructure",
+            "confidence": 0.93,
+            "sources": [
+              "python-helper:v1.0.0"
+            ]
+          }
+        }
+      },
+      "notes": [
+        "C plugin must correlate IDs: host id stays an-100; forwarded id can be pycall-100 but C must map results back to an-100.",
+        "C plugin should validate Python response schema and fail gracefully if missing fields.",
+        "If Python plugin times out or returns error, C plugin should reply with status 'error' and appropriate code (e.g., 301 runtime timeout)."
+      ]
+    },
+    {
+      "name": "Batch analyze (parallel forwards)",
+      "description": "C plugin can forward multiple items to Python concurrently (bounded concurrency). This example sends 3 docs and aggregates results.",
+      "host_request": {
+        "id": "an-101",
+        "type": "exec",
+        "payload": {
+          "action": "analyze_batch",
+          "args": {
+            "documents": [
+              "First doc text.",
+              "Second doc text.",
+              "Third doc text."
+            ]
+          }
+        }
+      },
+      "expected_c_response": {
+        "id": "an-101",
+        "status": "ok",
+        "code": 0,
+        "body": {
+          "action": "analyze_batch",
+          "results": [
+            { "classification": "alpha", "confidence": 0.75 },
+            { "classification": "beta", "confidence": 0.82 },
+            { "classification": "gamma", "confidence": 0.66 }
+          ]
+        }
+      },
+      "notes": [
+        "Enforce concurrency bound (e.g., 4 workers) to avoid resource exhaustion.",
+        "If any item fails irrecoverably, return status 'error' with partial results in body.meta if appropriate."
+      ]
+    }
+  ],
+  "sample_docker_compose_snippet": {
+    "description": "Illustration to run both plugins together in a sandbox using docker-compose. Replace images with real built tags.",
+    "yaml": "version: '3.8'\nservices:\n  omni-py-helper:\n    image: omniflow/plugin-py:latest\n    container_name: omni-py-helper\n    environment:\n      - OMNIFLOW_PLUGIN_MAX_LINE=131072\n      - OMNIFLOW_EXEC_TIMEOUT=8\n    entrypoint: [\"python3\",\"/opt/omniflow/plugins/python/sample_plugin.py\"]\n    restart: on-failure\n    read_only: true\n    cap_drop: [\"ALL\"]\n\n  omni-c-analyzer:\n    image: omniflow/plugin-c:latest\n    container_name: omni-c-analyzer\n    environment:\n      - OMNIFLOW_PLUGIN_MAX_LINE=131072\n      - OMNIFLOW_EXEC_TIMEOUT=12\n      - PY_PLUGIN_ENDPOINT=unix:///tmp/omniflow/py.sock\n    entrypoint: [\"/opt/omniflow/bin/sample_plugin\"]\n    restart: on-failure\n    depends_on:\n      - omni-py-helper\n    read_only: true\n    cap_drop: [\"ALL\"]\n\n# Note: For unix socket forwarding, you may need to mount a shared volume at /tmp/omniflow\n"
+  },
+  "example_host_emulator_script": {
+    "description": "Minimal host emulator (bash) that sends the 'analyze' message to the C plugin process running locally and prints response.",
+    "script": "#!/usr/bin/env bash\n# Usage: ./host_emulator.sh /path/to/c_plugin_binary\nC_PLUGIN_BIN=${1:-./build/out/sample_plugin}\nif [ ! -x \"$C_PLUGIN_BIN\" ]; then echo \"C plugin binary not found: $C_PLUGIN_BIN\"; exit 2; fi\nREQ='{\"id\":\"an-100\",\"type\":\"exec\",\"payload\":{\"action\":\"analyze\",\"args\":{\"document\":\"OmniFlow is a modular host/plug-in framework.\"}}}'\n# send request and capture one-line response\nRESP=$(echo \"$REQ\" | \"$C_PLUGIN_BIN\" 2>/dev/null | head -n1)\necho \"Host sent: $REQ\"\necho \"Plugin responded: $RESP\"\n"
+  },
+  "validation_and_tests": {
+    "jq_examples": [
+      {
+        "purpose": "Validate C plugin response classification present",
+        "cmd": "echo '{...json...}' | jq -e '.status==\"ok\" and .body.result.classification != null' || exit 1"
+      },
+      {
+        "purpose": "Check confidence numeric and >= 0.0",
+        "cmd": "echo '{...json...}' | jq -e '.body.result.confidence >= 0.0' || exit 1"
+      }
+    ],
+    "integration_tests": [
+      "Test health probes for both plugins",
+      "Test single analyze flow and assert mapping of IDs and fields",
+      "Test Python timeouts cause C plugin to return error code 301",
+      "Test oversized payload rejection (plugin returns code 101)"
+    ]
+  },
+  "security_considerations": {
+    "input_limits": "Always enforce OMNIFLOW_PLUGIN_MAX_LINE before parsing. Reject oversized payloads with code 101.",
+    "timeout_handling": "Host sets OMNIFLOW_EXEC_TIMEOUT; C plugin must enforce timeout on forwarded calls and abort Python calls if exceeded.",
+    "least_privilege": "Run plugins as non-root and drop capabilities. Disable network by default. Use read-only mounts for model/data files.",
+    "secrets": "Do not store secrets in repo. Inject secrets at runtime via secret managers or host-provided volume with strict permissions."
+  },
+  "release_notes_and_sbom": {
+    "recommendation": "When releasing, include SBOM for both C and Python artifacts, sign binaries and publish checksums. Note the python-helper version used in the C plugin response body.sources array.",
+    "example_metadata_fields": [
+      "version",
+      "vcs_ref",
+      "build_date",
+      "sbom_spdx",
+      "sbom_cyclonedx",
+      "signatures"
+    ]
+  },
+  "troubleshooting": {
+    "no_response_from_c_plugin": [
+      "Verify the C plugin binary is listening for stdin (not blocked by interactive input).",
+      "Check C plugin stderr logs for startup errors.",
+      "Run a health probe manually: echo '{\"id\":\"hc\",\"type\":\"health\"}' | /path/to/c_plugin"
+    ],
+    "python_helper_unreachable": [
+      "If C plugin expects a unix socket, verify socket path exists and permissions allow C plugin to connect.",
+      "If using containerized Python plugin, ensure host network or socket mounting is configured correctly."
+    ],
+    "invalid_schema_from_python": [
+      "C plugin should validate python response and return an error rather than propagate malformed content.",
+      "Add unit tests to assert schema _before_ mapping to host response."
+    ]
+  },
+  "notes_for_maintainers": {
+    "keep_examples_in_sync": "If you change plugin API or messages, update this example and the integration tests accordingly.",
+    "CI": "Add CI matrix rows to build and test both plugins and run the integration harness that exercises this example.",
+    "versioning": "Pin helper plugin major version in C plugin responses to aid traceability."
+  }
+}
