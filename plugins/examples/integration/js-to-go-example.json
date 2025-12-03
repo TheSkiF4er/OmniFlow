@@ -1,1 +1,259 @@
-
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2025-12-03T00:00:00Z",
+  "example_name": "JavaScript → Go Plugin Integration Example",
+  "description": "End-to-end integration example demonstrating a host (or host-emulator) sending NDJSON requests to a JavaScript (Node.js) plugin which forwards work to a Go helper plugin and returns aggregated results. This template shows recommended wiring, sample messages, healthchecks, expected responses, security guidance and troubleshooting tips. Use it as a canonical example when integrating JS and Go plugins in OmniFlow.",
+  "maintainer": {
+    "name": "TheSkiF4er / OmniFlow",
+    "contact": "maintainers@omniflow.example",
+    "license": "Apache-2.0"
+  },
+  "overview": {
+    "purpose": "Demonstrate how a Node.js plugin can accept host requests and delegate CPU-bound work or low-level system tasks to a Go helper plugin. The JS plugin acts as the primary registered plugin for the host and forwards specialized tasks to the Go helper via a small RPC (UNIX socket, gRPC, or subprocess pipes). The example documents NDJSON flows, environment variables, resource controls and expected JSON payloads.",
+    "assumptions": [
+      "Both plugins implement the OmniFlow NDJSON protocol (one JSON object per line on stdin/stdout).",
+      "Plugins run as separate processes/containers and the host wires them together; the Node plugin may spawn the Go helper or call it over a socket.",
+      "Hosts and plugins enforce OMNIFLOW_PLUGIN_MAX_LINE (default 131072 bytes)."
+    ]
+  },
+  "global_defaults": {
+    "OMNIFLOW_PLUGIN_MAX_LINE": 131072,
+    "OMNIFLOW_EXEC_TIMEOUT": 10,
+    "OMNIFLOW_PLUGIN_HEARTBEAT": 5,
+    "OMNIFLOW_LOG_JSON": "false",
+    "restart_policy": "on-failure"
+  },
+  "host_integration": {
+    "how_to_start": [
+      "Start the Go helper plugin container/process first if Node expects it to be available (socket path or port).",
+      "Start the Node (JavaScript) plugin process and confirm readiness with a health request from the host.",
+      "Host may supervise both processes (systemd, container orchestrator) and set environment variables accordingly."
+    ],
+    "healthcheck_example": {
+      "command": "echo '{\"id\":\"hc-js-1\",\"type\":\"health\",\"payload\":null}' | /opt/omniflow/plugins/javascript/sample_plugin.js",
+      "expected_response": {
+        "id": "hc-js-1",
+        "status": "ok",
+        "code": 0,
+        "body": {
+          "status": "healthy",
+          "version": "1.0.0"
+        }
+      }
+    },
+    "supervisor_note": "When using containers, run plugins as non-root, mount shared unix socket paths as volumes if using socket RPC, and ensure read-only rootfs where possible."
+  },
+  "js_plugin": {
+    "id": "omni-js-proxy",
+    "path": "plugins/javascript/sample_plugin.js",
+    "description": "Primary plugin implemented in Node.js. Accepts 'exec' actions from host and forwards compute- or system-level tasks to the Go helper when appropriate. Performs input validation and aggregates helper results before responding to the host.",
+    "env": {
+      "OMNIFLOW_PLUGIN_MAX_LINE": 131072,
+      "OMNIFLOW_EXEC_TIMEOUT": 12,
+      "OMNIFLOW_LOG_JSON": "true",
+      "GO_HELPER_ENDPOINT": "unix:///tmp/omniflow/go.sock",
+      "GO_HELPER_CMD": "/opt/omniflow/plugins/go/sample_plugin"
+    },
+    "runtime": {
+      "container_image": "omniflow/plugin-ts:latest",
+      "entrypoint": "node /opt/omniflow/plugins/javascript/sample_plugin.js",
+      "user": "node"
+    },
+    "security": {
+      "drop_capabilities": [
+        "ALL"
+      ],
+      "allow_network": false,
+      "sandbox_notes": "Run under Node's worker threads or a restricted subprocess when executing untrusted payloads. Avoid eval()/Function() patterns."
+    },
+    "notes": [
+      "Node plugin should not perform untrusted native bindings operations without validation.",
+      "Prefer sending small, validated payloads to the Go helper; keep forwarding protocol simple and well-documented."
+    ]
+  },
+  "go_plugin": {
+    "id": "omni-go-worker",
+    "path": "plugins/go/sample_plugin",
+    "description": "Go helper plugin responsible for CPU-bound or low-level tasks (e.g., compression, binary parsing). Exposes a small NDJSON-over-stdin/stdout interface or a lightweight RPC (unix socket or gRPC). Compiled Go binaries are small and suitable as helper workers.",
+    "env": {
+      "OMNIFLOW_PLUGIN_MAX_LINE": 131072,
+      "OMNIFLOW_EXEC_TIMEOUT": 8,
+      "OMNIFLOW_LOG_JSON": "false"
+    },
+    "runtime": {
+      "container_image": "omniflow/plugin-go:latest",
+      "entrypoint": "/opt/omniflow/bin/sample_plugin_go",
+      "user": "omniflow"
+    },
+    "security": {
+      "drop_capabilities": [
+        "ALL"
+      ],
+      "allow_network": false,
+      "seccomp_profile": "default"
+    },
+    "notes": [
+      "Go helper should validate input shapes and enforce per-request limits.",
+      "If exposing a unix socket, ensure socket permissions allow only the Node plugin user to connect."
+    ]
+  },
+  "integration_flow_examples": [
+    {
+      "name": "Text-transform (JS ➜ Go) - single request",
+      "description": "Host sends 'transform' exec request to JS plugin; JS forwards to Go helper to perform CPU-efficient transformation (e.g., heavy regex, compression). Go responds; JS wraps the result and replies to host.",
+      "host_request": {
+        "id": "js-go-100",
+        "type": "exec",
+        "payload": {
+          "action": "transform",
+          "args": {
+            "algorithm": "compress_base64",
+            "data": "The quick brown fox jumps over the lazy dog."
+          }
+        }
+      },
+      "js_forward_to_go": {
+        "id": "go-call-100",
+        "type": "exec",
+        "payload": {
+          "action": "compress",
+          "args": {
+            "algorithm": "zlib",
+            "data": "The quick brown fox jumps over the lazy dog."
+          }
+        }
+      },
+      "go_response": {
+        "id": "go-call-100",
+        "status": "ok",
+        "code": 0,
+        "body": {
+          "action": "compress",
+          "compressed_base64": "eJzLKCkpKLbS10/OLS5OTE8FAP//"
+        }
+      },
+      "js_response_to_host_expected": {
+        "id": "js-go-100",
+        "status": "ok",
+        "code": 0,
+        "body": {
+          "action": "transform",
+          "result": {
+            "method": "compress_base64",
+            "payload": "eJzLKCkpKLbS10/OLS5OTE8FAP//",
+            "source": "go-worker:v1.0.0"
+          }
+        }
+      },
+      "notes": [
+        "JS must map host request id (js-go-100) and correlate the Go helper id (go-call-100). Final response must use the host id.",
+        "If Go helper times out or returns error, JS plugin must return `status: error` with appropriate `code` and a human-friendly `message`."
+      ]
+    },
+    {
+      "name": "Batch parse (parallel forwards)",
+      "description": "JS plugin receives a batch of binary blobs and forwards each to Go helper concurrently (bounded concurrency). Aggregates results and returns to host.",
+      "host_request": {
+        "id": "js-go-101",
+        "type": "exec",
+        "payload": {
+          "action": "parse_batch",
+          "args": {
+            "blobs": [
+              "VGhpcyBpcyBmaXJzdCBibG9iIQ==",
+              "U2Vjb25kIGJsb2Iu",
+              "VGhpcmQgYm9iIQ=="
+            ]
+          }
+        }
+      },
+      "expected_js_response": {
+        "id": "js-go-101",
+        "status": "ok",
+        "code": 0,
+        "body": {
+          "action": "parse_batch",
+          "results": [
+            { "ok": true, "meta": { "length": 21 } },
+            { "ok": true, "meta": { "length": 13 } },
+            { "ok": true, "meta": { "length": 12 } }
+          ]
+        }
+      },
+      "notes": [
+        "Bounded concurrency (e.g., 4 workers) required to limit memory/CPU usage.",
+        "Partial failures: return `status: error` for full failure, or `status: ok` with per-item `ok:false` entries if partial results are acceptable (document behaviour)."
+      ]
+    }
+  ],
+  "rpc_options_and_patterns": {
+    "subprocess_pipes": "Node can spawn Go helper as a child process and exchange NDJSON over pipes. Simpler but couples lifecycles.",
+    "unix_socket_rpc": "Preferred for decoupled lifecycles: Go helper listens on a unix socket (path owned by omniflow) and Node connects to forward requests. Ensure socket perms are correct.",
+    "http_local": "Lightweight HTTP on localhost can be used (loopback only) but increases attack surface; restrict to unix sockets if possible.",
+    "grpc": "If performance and schema are important, use gRPC (with TLS disabled for local sockets) and simple protobufs. Requires more build infra."
+  },
+  "sample_docker_compose_snippet": {
+    "description": "Compose snippet to run JS and Go plugins together in a sandbox (replace images with built artifacts).",
+    "yaml": "version: '3.8'\nservices:\n  omni-go-worker:\n    image: omniflow/plugin-go:latest\n    container_name: omni-go-worker\n    environment:\n      - OMNIFLOW_PLUGIN_MAX_LINE=131072\n      - OMNIFLOW_EXEC_TIMEOUT=8\n    entrypoint: [\"/opt/omniflow/bin/sample_plugin_go\"]\n    restart: on-failure\n    read_only: true\n    cap_drop: [\"ALL\"]\n    volumes:\n      - ./socket-dir:/tmp/omniflow:rw\n\n  omni-js-proxy:\n    image: omniflow/plugin-ts:latest\n    container_name: omni-js-proxy\n    environment:\n      - OMNIFLOW_PLUGIN_MAX_LINE=131072\n      - OMNIFLOW_EXEC_TIMEOUT=12\n      - GO_HELPER_ENDPOINT=unix:///tmp/omniflow/go.sock\n    entrypoint: [\"node\",\"/opt/omniflow/plugins/javascript/sample_plugin.js\"]\n    restart: on-failure\n    read_only: true\n    cap_drop: [\"ALL\"]\n    volumes:\n      - ./socket-dir:/tmp/omniflow:rw\n"
+  },
+  "example_host_emulator_script": {
+    "description": "Minimal host emulator (bash) that sends a 'transform' request to the JS plugin and prints response.",
+    "script": "#!/usr/bin/env bash\n# Usage: ./host_emulator.sh /path/to/js_plugin\nJS_PLUGIN_CMD=${1:-node ./build/dist/sample_plugin.js}\nREQ='{\"id\":\"js-go-100\",\"type\":\"exec\",\"payload\":{\"action\":\"transform\",\"args\":{\"algorithm\":\"compress_base64\",\"data\":\"The quick brown fox jumps over the lazy dog.\"}}}'\nRESP=$(echo \"$REQ\" | $JS_PLUGIN_CMD 2>/dev/null | head -n1)\necho \"Host sent: $REQ\"\necho \"Plugin responded: $RESP\"\n"
+  },
+  "validation_and_tests": {
+    "jq_examples": [
+      {
+        "purpose": "Confirm final response has compressed payload and source metadata",
+        "cmd": "echo '{...json...}' | jq -e '.status==\"ok\" and .body.result.payload != null and .body.result.source != null' || exit 1"
+      },
+      {
+        "purpose": "Check numeric confidence or length fields",
+        "cmd": "echo '{...json...}' | jq -e '.body.result | (has(\"confidence\") and (.confidence >= 0.0)) or (has(\"payload\") and (.payload | length > 0))' || exit 1"
+      }
+    ],
+    "integration_tests": [
+      "Health probe for both JS and Go plugins",
+      "Single transform flow with correct mapping of ids and fields",
+      "Batch parse with bounded concurrency and aggregate verification",
+      "Oversized payload rejection (plugin responds code 101)",
+      "Simulated Go helper timeout leads to JS plugin returning error code (e.g., 301)"
+    ]
+  },
+  "security_considerations": {
+    "input_limits": "Always enforce OMNIFLOW_PLUGIN_MAX_LINE before parsing. Reject oversized payloads with code 101 to prevent memory exhaustion.",
+    "timeout_handling": "Host sets OMNIFLOW_EXEC_TIMEOUT; JS plugin must enforce timeouts on forwarded calls to Go helper and abort/cleanup if exceeded.",
+    "least_privilege": "Run both plugins as non-root users. Drop capabilities and use seccomp/AppArmor profiles where supported.",
+    "socket_permissions": "If using unix sockets, set owner/group to plugin users and restrict perms to 0700 or 0760 as appropriate.",
+    "dependency_hygiene": "Pin Node.js dependencies in package.json and ensure `go mod` uses exact versions. Generate SBOMs and run SCA during CI."
+  },
+  "release_notes_and_sbom": {
+    "recommendation": "Include SBOMs for both JS (npm lockfile-based) and Go (go.sum) artifacts. Sign binaries and package payloads. Publish checksums (sha256/sha512) and store provenance metadata.",
+    "example_metadata_fields": [
+      "version",
+      "vcs_ref",
+      "build_date",
+      "sbom_spdx",
+      "sbom_cyclonedx",
+      "signatures"
+    ]
+  },
+  "troubleshooting": {
+    "no_response_from_js_plugin": [
+      "Ensure JS plugin binary/entrypoint exists and is executable; check stderr for startup errors.",
+      "Manually run: echo '{\"id\":\"hc-js-1\",\"type\":\"health\"}' | node /path/to/sample_plugin.js"
+    ],
+    "go_helper_unreachable": [
+      "If using unix socket, confirm socket file exists and perms allow Node to connect.",
+      "If Go helper spawned as subprocess, check that Node spawns it correctly and pipes are connected."
+    ],
+    "unexpected_schema_from_go": [
+      "JS plugin must validate Go helper responses and return a clear `error` response rather than propagate malformed content.",
+      "Add unit tests that simulate malformed Go responses to verify JS validation logic."
+    ]
+  },
+  "notes_for_maintainers": {
+    "keep_examples_in_sync": "Update this example when changing plugin API or forwarding behavior. Keep integration tests updated to reflect intended behaviour.",
+    "ci": "Add CI matrix rows to build and test both plugins and run the integration harness that exercises this example.",
+    "versioning": "Record helper plugin version strings in responses to enable traceability (body.result.source)."
+  }
+}
