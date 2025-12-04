@@ -56,12 +56,12 @@ plugins/kotlin/
 │
 ├── test/
 │   ├── integration_test.sh  # End-to-end protocol integration test
-│   └── plugin_test.go       # Unit tests for plugin logic
+│   └── pluginTest.kt       # Unit tests for plugin logic
 │
 ├── build.gradle.kts              # Gradle Kotlin DSL build
 ├── Dockerfile                    # Multi-stage Dockerfile for building + runtime
 ├── README.md                     # (this file)
-└── sample_plugin.kts                       # main plugin source (example name)
+└── sample_plugin.kts       # main plugin source (example name)
 ```
 
 ---
