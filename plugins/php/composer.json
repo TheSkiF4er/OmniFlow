@@ -1,1 +1,70 @@
-
+{
+    "name": "omniflow/php-plugin",
+    "description": "Official PHP plugin for the OmniFlow Runtime — provides NDJSON IPC processing, command execution, health checks and extensible plugin actions.",
+    "type": "library",
+    "license": "Apache-2.0",
+    "version": "1.0.0",
+    "authors": [
+        {
+            "name": "TheSkiF4er",
+            "email": "dev@cajeer.com",
+            "role": "Lead Developer"
+        }
+    ],
+    "homepage": "https://github.com/TheSkiF4er/OmniFlow",
+    "keywords": [
+        "omniflow",
+        "plugin",
+        "runtime",
+        "ipc",
+        "ndjson",
+        "php",
+        "extension",
+        "automation"
+    ],
+    "require": {
+        "php": ">=8.1",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "symfony/process": "^7.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0",
+        "vimeo/psalm": "^6.0",
+        "squizlabs/php_codesniffer": "^3.10",
+        "friendsofphp/php-cs-fixer": "^3.50"
+    },
+    "autoload": {
+        "psr-4": {
+            "OmniFlow\\Plugin\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "OmniFlow\\Plugin\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit --configuration tests/phpunit.xml",
+        "lint": "phpcs --standard=PSR12 src/",
+        "fix": "php-cs-fixer fix src/",
+        "stan": "psalm --output-format=compact",
+        "build": [
+            "@lint",
+            "@stan",
+            "@test"
+        ]
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true,
+        "allow-plugins": {
+            "composer/package-versions-deprecated": true
+        }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "1.0-dev"
+        }
+    }
+}
