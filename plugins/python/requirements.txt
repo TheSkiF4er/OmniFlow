@@ -1,1 +1,24 @@
+# OmniFlow/plugins/python/requirements.txt
+# Production-ready pinned dependencies (runtime + common dev/test tools)
+# Last reviewed: 2025-12-05
+#
+# Runtime libraries
+aiohttp==3.9.4            # async HTTP client/server framework
+ujson==5.8.0              # ultra-fast JSON encoder/decoder (optional performance)
+python-dotenv==1.0.0     # read .env files into environment
+click==8.1.7             # CLI helpers (optional)
+requests==2.31.0         # HTTP client (synchronous)
 
+# Testing & CI tools
+pytest==7.4.2            # test runner
+pytest-asyncio==0.22.0   # asyncio support for pytest
+pytest-xdist==3.2.2      # parallel test execution
+
+# Lint / formatting / static typing (dev tooling)
+black==24.10.0           # code formatter
+mypy==1.10.0             # static type checker
+flake8==6.1.0            # linting
+
+# Optional: packaging / release helpers (recommended in CI/CD only)
+pip-tools==6.16.0        # pip-compile / pip-sync for lockfile generation
+twine==4.0.2             # upload packages to PyPI (if publishing)
