@@ -1,1 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  plugins/php/tests/phpunit.xml
 
+  Production-ready PHPUnit configuration for OmniFlow PHP plugin tests.
+  - Compatible with PHPUnit 11 / PHP 8.1+
+  - Enables useful defaults for CI: colors, verbose, fail-on-warning, fail-on-risky
+  - Provides code coverage configuration (collector + report paths)
+  - Defines test suites and logging (JUnit + coverage)
+  - Adjust paths (bootstrap, src, tests) if your project layout differs
+-->
+<phpunit
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/11.0/phpunit.xsd"
+    bootstrap="../vendor/autoload.php"
+    colors="true"
+    verbose="true"
+    stopOnFailure="false"
+    beStrictAboutTestsThatDoNotTestAnything="true"
+    beStrictAboutOutputDuringTests="true"
+    failOnWarning="true"
+    failOnRisky="true"
+    executionOrder="random"
+    convertWarningsToExceptions="true"
+    convertErrorsToExceptions="true"
+    convertNoticesToExceptions="true"
+>
+    <!-- Environment / php settings -->
+    <php>
+        <!-- Ensure tests have enough memory in CI -->
+        <ini name="memory_limit" value="512M"/>
+        <!-- Set timezone for deterministic tests -->
+        <ini name="date.timezone" value="UTC"/>
+        <!-- Optional: turn off xdebug auto-coverage in some CI setups -->
+        <ini name="xdebug.mode" value="coverage"/>
+    </php>
+
+    <!-- Logging for CI: JUnit & TeamCity compatible reports -->
+    <logging>
+        <!-- JUnit report for CI test reports -->
+        <log type="junit" target="../build/logs/phpunit/junit.xml" logIncompleteSkipped="true"/>
+        <!-- TestDox HTML (human readable) -->
+        <log type="testdox-html" target="../build/logs/phpunit/testdox.html"/>
+        <!-- Plain text summary -->
+        <log type="teamcity" target="php://stderr"/>
+    </logging>
+
+    <!-- Coverage collection -->
+    <coverage processUncoveredFiles="false" cacheDirectory="../build/.phpunit_coverage_cache">
+        <include>
+            <!-- Include production code only -->
+            <directory suffix=".php">../src</directory>
+        </include>
+        <report>
+            <!-- Multiple report types for CI/artifact publishing -->
+            <clover outputFile="../build/logs/phpunit/clover.xml"/>
+            <html outputDirectory="../build/logs/phpunit/coverage-html"/>
+            <text outputFile="../build/logs/phpunit/coverage.txt" showUncoveredFiles="false"/>
+        </report>
+    </coverage>
+
+    <!-- Test suite definitions -->
+    <testsuites>
+        <testsuite name="Unit">
+            <directory suffix="Test.php">../tests/Unit</directory>
+        </testsuite>
+
+        <testsuite name="Integration">
+            <directory suffix="Test.php">../tests/Integration</directory>
+        </testsuite>
+
+        <!-- Fallback: all tests in tests/ -->
+        <testsuite name="All">
+            <directory suffix=".php">../tests</directory>
+        </testsuite>
+    </testsuites>
+
+    <!-- PHP extensions required for tests (fail early if missing) -->
+    <extensions>
+        <!-- Example: ensure ext-json and ext-mbstring exist -->
+        <extension name="json"/>
+        <extension name="mbstring"/>
+    </extensions>
+
+    <!-- Execution settings — parallelization optional (comment/uncomment if needed) -->
+    <!--
+    <parallel processIsolation="false">
+        <processes>4</processes>
+    </parallel>
+    -->
+
+    <!-- Test event listeners, if you add custom listeners -->
+    <!--
+    <listeners>
+        <listener class="My\Custom\Listener" file="../tests/bootstrap/CustomListener.php"/>
+    </listeners>
+    -->
+
+    <!-- Optional: Strict coverage thresholds (uncomment and configure for CI enforcement) -->
+    <!--
+    <coverage>
+        <thresholds>
+            <statement>70</statement>
+            <method>60</method>
+            <line>70</line>
+            <element>70</element>
+        </thresholds>
+    </coverage>
+    -->
+
+</phpunit>
