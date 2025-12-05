@@ -49,17 +49,15 @@ The code here is intended as a reference implementation and a template you can a
 
 ```
 plugins/typescript/
-├── src/                       # TypeScript source code
-├── dist/                      # Compiled JS (gitignored; produced by `npm run build`)
 ├── tests/                     # Jest integration/unit tests
+    └── sample_plugin.spec.ts
 ├── package.json               # npm metadata & scripts
 ├── package-lock.json          # (recommended) lockfile for reproducible installs
 ├── tsconfig.json              # TypeScript config
 ├── .eslintrc.js               # ESLint config
 ├── .prettierrc                # Prettier config
 ├── Dockerfile                 # Multi-stage production Dockerfile
-├── README.md                  # (this file)
-└── LICENSE                    # Apache-2.0
+└── README.md                  # (this file)
 ```
 
 ---
