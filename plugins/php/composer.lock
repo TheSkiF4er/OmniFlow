@@ -1,1 +1,3 @@
-
+cd OmniFlow/plugins/php
+composer validate
+composer install --no-dev --prefer-dist --optimize-autoloader
