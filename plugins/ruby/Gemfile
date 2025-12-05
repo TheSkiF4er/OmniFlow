@@ -1,1 +1,84 @@
+# OmniFlow/plugins/ruby/Gemfile
+#
+# Production-ready Gemfile for the OmniFlow Ruby plugin.
+# - Minimal, secure runtime deps
+# - Well-scoped development & test tools for CI (linting, security, formatting, testing)
+# - Grouped gems for clear separation of runtime vs dev/test/ci
+#
+# Usage:
+#   bundle install --path vendor/bundle
+#   bundle install --with development test
+#
+# Notes:
+#  - Keep runtime deps minimal in :default group.
+#  - Use `bundle lock --add-platform ruby` in CI to ensure reproducible lockfiles across platforms.
 
+source "https://rubygems.org"
+
+ruby ">= 3.1", :engine => "ruby"
+
+####################################
+# Runtime / Production dependencies
+####################################
+# Use a small, fast JSON library (optional - stdlib JSON is fine; oj is faster)
+gem "oj", "~> 3.16"            # fast JSON (encoding/decoding), widely used in production
+
+# Logging / structured logging helpers (lightweight)
+gem "logging", "~> 2.3"        # flexible logging if you prefer over stdlib Logger
+
+# Small CLI helpers for plugin entrypoints (optional)
+gem "thor", "~> 1.2"           # simple CLI toolkit if plugin exposes commands
+
+# If you want to ship a packaged executable, consider 'bootsnap' for faster boot (optional)
+# gem "bootsnap", "~> 1.14", require: false
+
+####################################
+# Development & Test dependencies
+####################################
+group :development, :test do
+  # Test framework
+  gem "rspec", "~> 3.12"
+
+  # Fast, developer-friendly assertions & helpers
+  gem "rspec-core", "~> 3.12"
+  gem "rspec-expectations", "~> 3.12"
+  gem "rspec-mocks", "~> 3.12"
+
+  # Test coverage
+  gem "simplecov", "~> 1.17", require: false
+
+  # Linting & static analysis
+  gem "rubocop", "~> 1.32", require: false
+  gem "rubocop-performance", "~> 1.14", require: false
+  gem "rubocop-rspec", "~> 2.0", require: false
+
+  # Code style / auto-correct
+  gem "rubocop-rails", "~> 2.12", require: false
+
+  # Security auditing
+  gem "bundler-audit", "~> 0.9", require: false
+
+  # Dependency updates (optional convenience)
+  gem "dependabot-core", "~> 0.173", require: false
+
+  # Helpful dev tools
+  gem "pry", "~> 0.14"
+  gem "rake", "~> 13.0"
+end
+
+####################################
+# CI-only dependencies
+####################################
+group :ci do
+  # Static analysis and extra checks for CI pipelines
+  gem "brakeman", "~> 5.1", require: false    # useful for Rails apps (optional)
+  gem "overcommit", "~> 1.2", require: false  # git hooks (optional)
+end
+
+####################################
+# Platform-specific / optional
+####################################
+# If you target JRuby or Windows CI workers, add platform-specific gems via platform: option
+# gem "win32console", "~> 1.3", platforms: [:mswin, :mingw]
+
+# EOF
