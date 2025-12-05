@@ -1,1 +1,84 @@
-
+{
+  "name": "omniflow-plugin-typescript",
+  "version": "1.0.0",
+  "description": "OmniFlow TypeScript plugin — NDJSON stdin/stdout plugin template and runtime helpers for OmniFlow (production-ready).",
+  "keywords": [
+    "omniflow",
+    "plugin",
+    "ndjson",
+    "workflow",
+    "typescript",
+    "automation"
+  ],
+  "homepage": "https://github.com/TheSkiF4er/OmniFlow",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TheSkiF4er/OmniFlow.git",
+    "directory": "plugins/typescript"
+  },
+  "bugs": {
+    "url": "https://github.com/TheSkiF4er/OmniFlow/issues"
+  },
+  "license": "Apache-2.0",
+  "author": "TheSkiF4er <dev@omniflow.example>",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "main": "dist/sample_plugin.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "omniflow-plugin-ts": "dist/sample_plugin.js"
+  },
+  "scripts": {
+    "clean": "rimraf dist .tsbuildinfo",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "dev": "ts-node --transpile-only src/sample_plugin.ts",
+    "start": "node dist/sample_plugin.js",
+    "lint": "eslint 'src/**/*.ts' --max-warnings=0",
+    "lint:fix": "eslint 'src/**/*.ts' --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "test": "jest --passWithNoTests --runInBand",
+    "test:watch": "jest --watch",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "dependencies": {
+    "commander": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.3",
+    "@types/node": "^20.5.1",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.48.0",
+    "eslint-config-prettier": "^9.3.0",
+    "eslint-plugin-import": "^2.28.1",
+    "eslint-plugin-jest": "^27.1.6",
+    "jest": "^29.7.0",
+    "prettier": "^3.9.0",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.1.1",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.6.2"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": [
+      "<rootDir>/plugins/typescript/tests/**/*.spec.ts",
+      "<rootDir>/plugins/typescript/tests/**/*.test.ts"
+    ],
+    "collectCoverageFrom": [
+      "src/**/*.{ts,tsx}"
+    ],
+    "coverageDirectory": "<rootDir>/plugins/typescript/build/coverage"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
