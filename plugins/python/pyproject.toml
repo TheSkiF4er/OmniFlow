@@ -1,1 +1,139 @@
+# OmniFlow/plugins/python/pyproject.toml
+# Production-ready pyproject for the OmniFlow Python plugin module.
+# - Poetry-style configuration (recommended)
+# - Packaging metadata, dependencies, dev-dependencies
+# - Entry points (console script) for running the plugin
+# - Tool configs for black, mypy and pytest to help CI consistency
+#
+# IMPORTANT:
+# After placing this file run:
+#   poetry install
+#   poetry lock
+# to generate an authoritative poetry.lock before release.
 
+[tool.poetry]
+name = "omniflow-plugin-python"
+version = "1.0.0"
+description = "OmniFlow Python plugin — NDJSON protocol helpers and production-ready plugin template for OmniFlow."
+authors = ["TheSkiF4er <dev@cajeer.com>"]
+license = "Apache-2.0"
+readme = "README.md"
+homepage = "https://github.com/TheSkiF4er/OmniFlow"
+repository = "https://github.com/TheSkiF4er/OmniFlow"
+keywords = ["omniflow", "plugin", "ndjson", "workflow", "automation", "python"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Libraries :: Application Frameworks"
+]
+
+# Where package code lives (standard layout)
+packages = [
+  { include = "omniflow_plugin", from = "src" }
+]
+
+# Files to include in sdist/wheel (extra docs, license, examples)
+include = [
+  { path = "README.md" },
+  { path = "LICENSE" },
+  { path = "plugins/common/protocol.md" },
+  { path = "plugins/common/plugin-api.md" }
+]
+
+[tool.poetry.dependencies]
+python = ">=3.8,<4.0"
+# Runtime dependencies - pinned to conservative, tested versions (update as needed)
+aiohttp = ">=3.8,<4.0"
+ujson = ">=5.7,<6.0"
+python-dotenv = ">=0.21.0,<2.0"
+click = ">=8.0,<9.0"
+requests = ">=2.31.0,<3.0"
+
+[tool.poetry.extras]
+# Optional, example extras (e.g. integrations)
+aws = ["boto3>=1.30.0"]
+
+[tool.poetry.dev-dependencies]
+pytest = ">=7.2,<8.0"
+pytest-asyncio = ">=0.20,<1.0"
+pytest-xdist = ">=3.2,<4.0"
+black = ">=24.10.0,<25.0"
+mypy = ">=1.10.0,<2.0"
+flake8 = ">=6.0,<7.0"
+pip-tools = ">=6.0,<7.0"
+twine = ">=4.0,<5.0"
+
+[tool.poetry.scripts]
+# Console entrypoint: runs the packaged plugin binary/runner
+# The package should provide omniflow_plugin.cli:main
+omniflow-plugin = "omniflow_plugin.cli:main"
+
+[build-system]
+requires = ["poetry-core>=1.5.0"]
+build-backend = "poetry.core.masonry.api"
+
+# -----------------------
+# Tool configurations
+# (Helpful defaults for development and CI; optional but recommended)
+# -----------------------
+
+[tool.black]
+line-length = 100
+target-version = ["py38", "py39", "py310", "py311"]
+include = '\.pyi?$'
+exclude = '''
+/(
+  \.venv
+  | build
+  | dist
+  | \.eggs
+  | \.git
+  | \.tox
+  | .*/migrations
+)/
+'''
+
+[tool.mypy]
+python_version = 3.9
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+strict_optional = true
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = ["E203", "W503"]
+exclude = ["__pycache__", ".venv", "build", "dist"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-q --strict-markers"
+testpaths = [
+  "tests"
+]
+log_cli = true
+log_cli_level = "INFO"
+
+# -----------------------
+# Optional: CI / publish helpers
+# -----------------------
+[tool.poetry.scripts.ci-checks]
+# Convenience script to run a recommended CI sanity check
+# Implemented in package as a helper module that runs lint, type-check, test
+# Points to omniflow_plugin.ci:run_checks if you implement it
+ci-checks = "omniflow_plugin.ci:run_checks"
+
+# -----------------------
+# Notes for maintainers
+# -----------------------
+#  - Use `poetry lock` / `poetry install` in the plugins/python directory to generate a real poetry.lock.
+#  - Keep runtime dependencies minimal for the plugin runtime; move heavy dev tools to dev-dependencies.
+#  - When publishing, build sdist and wheel via `poetry build` and sign artifacts in CI.
