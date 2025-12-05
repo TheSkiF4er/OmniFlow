@@ -1,129 +1,154 @@
-# OmniFlow Go Plugin Dockerfile (multi-stage, production-ready)
+# OmniFlow Ruby Plugin Dockerfile (multi-stage, production-ready)
 #
-# Location: OmniFlow/plugins/go/Dockerfile
+# Location: OmniFlow/plugins/ruby/Dockerfile
 #
 # Purpose:
-#   - Multi-stage build that compiles a statically linked, optimized Go binary
-#   - Minimal runtime image running as non-root user
-#   - Reproducible build metadata via build-args (VERSION, VCS_REF, BUILD_DATE)
-#   - Security: CGO disabled by default, trimmed binary, removed symbol table
-#   - Healthcheck: sends an NDJSON health probe and expects a valid JSON reply
-#   - Labels suitable for provenance / SBOM tooling
-#
-# Notes:
-#   - Requires Go modules (go.mod present in repo)
-#   - The plugin is expected to read NDJSON from stdin and write NDJSON to stdout
-#   - For even smaller images consider switching the final stage to scratch/distroless
+#   - Multi-stage build that installs Ruby gems (via Bundler) in a builder image
+#   - Produces a small, secure runtime image running as a non-root user
+#   - Supports native gem compilation by installing build deps in the builder only
+#   - Injects reproducible build metadata via build-args (VERSION, VCS_REF, BUILD_DATE)
+#   - Uses tini to reap child processes and forward signals correctly
+#   - Healthcheck: sends an NDJSON health probe to the plugin and expects a valid JSON reply
+#   - Labels for provenance / SBOM tooling
 #
 # Usage (example):
 #   docker build \
 #     --build-arg VERSION=1.2.3 \
 #     --build-arg VCS_REF=$(git rev-parse --short HEAD) \
 #     --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-#     -t omniflow/plugin-go:1.2.3 \
-#     -f plugins/go/Dockerfile .
+#     -t omniflow/plugin-ruby:1.2.3 \
+#     -f plugins/ruby/Dockerfile .
 #
-################################################################################
+# Notes:
+#   - This Dockerfile expects plugin files at plugins/ruby/ inside repository.
+#   - The plugin entrypoint defaults to /opt/omniflow/plugins/ruby/sample_plugin.rb.
+#     If your entrypoint differs, update COPY/ENTRYPOINT accordingly.
+#   - To keep the runtime small the builder compiles native extensions and we copy only
+#     the vendor/bundle and app code into the final image.
+#
+###############################################################################
 
-# --------------------------
+# ----------------------------
 # Builder stage
-# --------------------------
-FROM golang:1.21-alpine3.18 AS builder
+# ----------------------------
+FROM ruby:3.2-slim AS builder
 
-# Build metadata (injected into binary via -ldflags)
 ARG VERSION=unreleased
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
-ARG GOOS=linux
-ARG GOARCH=amd64
 
-ENV CGO_ENABLED=0 \
-    GO111MODULE=on \
-    GOPROXY=https://proxy.golang.org,direct \
-    GOCACHE=/go-cache
+ENV DEBIAN_FRONTEND=noninteractive \
+    BUNDLE_APP_CONFIG=/tmp/bundle_config
 
-WORKDIR /src
+WORKDIR /build
 
-# Cache deps: copy only go.mod and go.sum first to leverage layer caching
-COPY go.mod go.sum ./
-RUN apk add --no-cache git ca-certificates && \
-    go mod download
+# Install build dependencies needed for native gems (nokogiri, oj, etc.)
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+     build-essential \
+     libssl-dev \
+     libffi-dev \
+     libxml2-dev \
+     libxslt1-dev \
+     git \
+     ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
-# Copy full source
-COPY . .
+# Copy only Gemfile/Gemfile.lock first to leverage Docker caching
+COPY plugins/ruby/Gemfile plugins/ruby/Gemfile.lock* ./
 
-# Build flags: trimpath, strip symbol table, set version variables (main.package must expose variables if present)
-# Adjust -X flags to match package variable names in your code (example: main.version)
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/go-build \
-    set -eux; \
-    build_ldflags="-s -w -X 'github.com/TheSkiF4er/omniflow/plugins/go/pkg/version.Version=${VERSION}' -X 'github.com/TheSkiF4er/omniflow/plugins/go/pkg/version.VcsRef=${VCS_REF}' -X 'github.com/TheSkiF4er/omniflow/plugins/go/pkg/version.BuildDate=${BUILD_DATE}'"; \
-    # produce a single, statically-linked binary
-    go build -trimpath -ldflags="${build_ldflags}" -o /out/omniflow-plugin-go ./plugins/go/cmd/omniflow-plugin || (echo "go build failed" && exit 1)
+# Configure bundler for deployment-style install to vendor/bundle
+RUN gem install bundler -v 2.4.21 --no-document \
+  && bundle config set --local without 'development test' \
+  && bundle config set --local deployment 'true' \
+  && bundle config set --local path 'vendor/bundle'
 
-# --------------------------
+# Install app dependencies (production only)
+RUN bundle install --jobs=4 --retry=3
+
+# Copy plugin source into builder (after dependencies are installed)
+COPY plugins/ruby/ ./
+
+# Optional: run tests in builder to fail early in CI (toggle via build-arg)
+ARG RUN_TESTS=false
+RUN if [ "${RUN_TESTS}" = "true" ] && [ -f "spec/spec_helper.rb" ]; then \
+      gem install rspec --no-document && \
+      bundle exec rspec || (echo "RSpec tests failed" && exit 1); \
+    fi
+
+# Remove build-only packages and caches to reduce size (best-effort)
+RUN rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# ----------------------------
 # Runtime stage
-# --------------------------
-FROM alpine:3.18 AS runtime
+# ----------------------------
+FROM ruby:3.2-slim AS runtime
 
 ARG VERSION=unreleased
 ARG VCS_REF=unknown
 ARG BUILD_DATE=unknown
 
-# Minimal runtime packages for TLS, user management and tini (process reaper)
-RUN apk add --no-cache ca-certificates tini \
-    && update-ca-certificates
+ENV APP_HOME=/opt/omniflow \
+    PLUGIN_DIR=/opt/omniflow/plugins/ruby \
+    GEM_HOME=/opt/omniflow/vendor/bundle \
+    PATH=/opt/omniflow/vendor/bundle/ruby/3.2.0/bin:$PATH \
+    RACK_ENV=production \
+    RAILS_ENV=production \
+    OMNIFLOW_PLUGIN_MAX_LINE=131072 \
+    OMNIFLOW_EXEC_TIMEOUT=10
 
-# Application paths
-ENV APP_HOME=/opt/omniflow
-ENV BIN_DIR=${APP_HOME}/bin
-ENV PLUGIN_BIN=${BIN_DIR}/omniflow-plugin-go
+# Install tini (process reaper) and CA certificates
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends tini ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user and directories
-RUN addgroup -S plugin && adduser -S -G plugin plugin \
-    && mkdir -p ${BIN_DIR} ${APP_HOME}/log \
-    && chown -R plugin:plugin ${APP_HOME}
-
-# Copy binary from builder
-COPY --from=builder /out/omniflow-plugin-go ${PLUGIN_BIN}
-
-# Ensure correct permissions
-RUN chmod 0755 ${PLUGIN_BIN} && chown plugin:plugin ${PLUGIN_BIN}
-
-# Switch to non-root user
-USER plugin
+# Create non-root user & directories
+RUN groupadd --system omniflow && useradd --system --gid omniflow --create-home --home-dir /home/omniflow --shell /usr/sbin/nologin omniflow \
+  && mkdir -p ${PLUGIN_DIR} ${APP_HOME}/log ${GEM_HOME} \
+  && chown -R omniflow:omniflow ${APP_HOME} ${GEM_HOME}
 
 WORKDIR ${APP_HOME}
 
-# Entrypoint: run plugin binary (reads NDJSON from stdin; writes NDJSON to stdout)
-# Use tini in the exec form to reap processes and forward signals correctly
-ENTRYPOINT ["/sbin/tini", "--", "/opt/omniflow/bin/omniflow-plugin-go"]
+# Copy app code and vendor/bundle from builder
+COPY --from=builder /build/ ${PLUGIN_DIR}/
+# Copy the installed gems
+COPY --from=builder /build/vendor/ ${GEM_HOME}/
+
+# Ensure correct permissions
+RUN chown -R omniflow:omniflow ${PLUGIN_DIR} ${GEM_HOME} \
+  && chmod -R 0755 ${PLUGIN_DIR} || true
+
+# Switch to non-root user
+USER omniflow
+
+# Default entrypoint - run the Ruby plugin script.
+# The plugin must read NDJSON from stdin and write NDJSON to stdout.
+ENV PLUGIN_ENTRYPOINT=${PLUGIN_DIR}/sample_plugin.rb
+ENTRYPOINT ["/usr/bin/tini", "--", "ruby", "/opt/omniflow/plugins/ruby/sample_plugin.rb"]
 CMD []
 
-# Healthcheck: send a one-line NDJSON health probe to the plugin and expect a JSON reply.
+# Healthcheck: send a one-line NDJSON health probe to the plugin and expect a valid JSON reply.
 # The plugin must accept a single-line JSON object on stdin and write a single-line JSON response to stdout.
-HEALTHCHECK --interval=20s --timeout=5s --start-period=5s --retries=3 \
-  CMD printf '%s\n' '{"id":"hc-1","type":"health","payload":null}' | /opt/omniflow/bin/omniflow-plugin-go >/dev/null 2>&1 || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD printf '%s\n' '{"id":"hc-1","type":"health","payload":null}' | ruby ${PLUGIN_ENTRYPOINT} >/dev/null 2>&1 || exit 1
 
-# Provenance and SBOM-friendly labels
-LABEL org.opencontainers.image.title="OmniFlow Go Plugin" \
-      org.opencontainers.image.description="OmniFlow Go plugin — production-ready Go plugin for OmniFlow." \
+# Provenance / SBOM friendly labels
+LABEL org.opencontainers.image.title="OmniFlow Ruby Plugin" \
+      org.opencontainers.image.description="OmniFlow Ruby plugin — production-ready Ruby NDJSON plugin for OmniFlow." \
       org.opencontainers.image.vendor="TheSkiF4er / OmniFlow" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.created="${BUILD_DATE}"
 
-# Provide a small, helpful default for runtime tuning (can be overridden via docker run -e)
-ENV OMNIFLOW_PLUGIN_MAX_LINE=131072 \
-    OMNIFLOW_EXEC_TIMEOUT=10
+# Documentation: recommended runtime flags (not enforced)
+#  - --read-only, --tmpfs /tmp:rw, --cap-drop ALL, --security-opt no-new-privileges
+# Example:
+# docker run --rm \
+#   --read-only \
+#   --tmpfs /tmp:rw \
+#   --cap-drop ALL \
+#   --security-opt no-new-privileges \
+#   omniflow/plugin-ruby:1.2.3
 
-# Final notes (not enforced in the image):
-#  - For maximum minimal image size, consider replacing `alpine` with a distroless/scratch image and
-#    building a fully static binary. That requires verifying no CGO usage and copying /etc/ssl/certs appropriately.
-#  - Generate an SBOM (e.g. using syft) in CI after the image is built and attach it to the release artifacts.
-#  - To debug runtime issues, run the binary directly inside the container:
-#      docker run --rm -it --entrypoint sh omniflow/plugin-go:tag
-#      /opt/omniflow/bin/omniflow-plugin-go
-#
-################################################################################
+###############################################################################
