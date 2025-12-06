@@ -477,3 +477,96 @@ class AsyncOpenAIClient:
         if resp is None:
             return
             yield  # maintain generator type
+
+        # Aiohttp streaming approach: iterate over content chunks and attempt to parse JSON per line.
+        try:
+            async for raw in resp.content:
+                if not raw:
+                    continue
+                try:
+                    s = raw.decode("utf-8")
+                except Exception:
+                    s = raw.decode("utf-8", errors="ignore")
+                # break into lines if server sends newline-delimited chunks
+                for line in s.splitlines():
+                    if not line:
+                        continue
+                    # strip SSE prefix "data: "
+                    part = line.strip()
+                    if part.startswith("data:"):
+                        part = part[len("data:"):].strip()
+                    if part == "[DONE]":
+                        return
+                    # try parse JSON
+                    try:
+                        obj = json.loads(part)
+                        text = _extract_text_from_response(obj)
+                    except Exception:
+                        # not JSON, yield raw text
+                        text = part
+                    if on_chunk:
+                        try:
+                            on_chunk(text)
+                        except Exception:
+                            logger.exception("on_chunk handler raised")
+                    yield text
+        finally:
+            try:
+                await resp.release()
+            except Exception:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+
+    async def __aenter__(self):
+        await self._session_or_new()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.close()
+
+
+# ---- Small convenience factories ----
+def default_openai_client_from_env() -> OpenAIClient:
+    cfg = OpenAIConnectorConfig.from_env()
+    if cfg.api_key is None and not _HAS_OPENAI_SDK:
+        logger.warning("No OPENAI_API_KEY set and OpenAI SDK not present — calls may fail without credentials.")
+    return OpenAIClient(cfg)
+
+
+def default_async_openai_client_from_env() -> AsyncOpenAIClient:
+    cfg = OpenAIConnectorConfig.from_env()
+    if cfg.api_key is None and not _HAS_OPENAI_SDK:
+        logger.warning("No OPENAI_API_KEY set and OpenAI SDK not present — calls may fail without credentials.")
+    return AsyncOpenAIClient(cfg)
+
+
+# ---- Example usage (not executed on import) ----
+if __name__ == "__main__":  # pragma: no cover - examples only
+    logging.basicConfig(level=logging.INFO)
+    cfg = OpenAIConnectorConfig.from_env()
+    print("Config:", cfg)
+    client = OpenAIClient(cfg)
+    try:
+        sample = {"model": cfg.model, "messages": [{"role": "user", "content": "Say hello in three words."}], "max_tokens": 50}
+        res = client.create_completion(sample)
+        print("Sync text:", res.get("text"))
+    except Exception as exc:
+        logger.exception("Sync example failed: %s", exc)
+
+    if aiohttp is not None:
+        async def async_demo():
+            ac = AsyncOpenAIClient(cfg)
+            res = await ac.create_completion({"model": cfg.model, "messages": [{"role":"user","content":"Say hi"}]})
+            print("Async text:", res.get("text"))
+            # streaming example
+            async for chunk in ac.create_completion_stream({"model": cfg.model, "messages": [{"role":"user","content":"Stream one word at a time"}], "stream": True}):
+                print("chunk:", chunk)
+            await ac.close()
+        try:
+            asyncio.run(async_demo())
+        except Exception:
+            logger.exception("Async example failed")
+    else:
+        logger.info("aiohttp not installed; skipping async examples")
